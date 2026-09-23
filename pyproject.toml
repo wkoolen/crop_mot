@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "crop_mot"
+version = "0.1.0"
+description = "Multi-object tracking and data association for static plants in crop rows, seen by a quadruped."
+requires-python = ">=3.10"
+# Runtime dependencies are pinned in requirements.txt, which the Dockerfile installs.
+# They are repeated here so `pip install .` works standalone.
+dependencies = [
+    "numpy>=1.24,<2.0",
+    "scipy>=1.10,<1.14",
+    "matplotlib>=3.7,<4.0",
+    "PyYAML>=6.0",
+]
+
+[tool.setuptools]
+packages = [
+    "crop_mot",
+    "crop_mot.world",
+    "crop_mot.sensor",
+    "crop_mot.motion",
+    "crop_mot.filters",
+    "crop_mot.association",
+    "crop_mot.runner",
+    "crop_mot.analysis",
+]
+
+# NOTE for phase 2: ament_python invokes setup.py, so a setup.py mirroring this metadata is
+# added then. setuptools tolerates setup.py and pyproject.toml side by side, so no file in
+# this repo has to move.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: Monte-Carlo and other multi-run tests (deselect with '-m \"not slow\"')",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

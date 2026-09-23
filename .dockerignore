@@ -1,0 +1,19 @@
+# Keep the build context small and deterministic. Only requirements.txt is COPYed anyway,
+# but a large context slows every build on Docker Desktop.
+.git/
+.gitignore
+runs/
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.venv/
+venv/
+.devcontainer/
+.vscode/
+
+# Thesis artefacts that must never end up in an image.
+*.pptx
+*.drawio*
+*.pdf

@@ -1,0 +1,17 @@
+# Run outputs. Every run folder is reproducible from its config.yaml + seed, so there is no
+# reason to commit them. Commit a config, not a result.
+runs/*
+!runs/.gitkeep
+
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.venv/
+venv/
+
+# Editor noise
+.vscode/*
+!.vscode/settings.json
+.idea/

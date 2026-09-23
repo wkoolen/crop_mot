@@ -1,0 +1,60 @@
+# B2 run: a Bernoulli filter seeded from a CLUTTER detection, so r should decay.
+#
+# This is the phantom-track experiment. A track is born at scan 0 from a detection that has
+# no plant behind it; every subsequent scan fails to produce a detection there, and the
+# misdetection branch of the Bernoulli update drives r downward. The resulting r-vs-k curve
+# is the B2 deliverable, and B3 checks it against the hand-derived A2 recursion.
+
+name: b2_bernoulli_phantom
+seed: 42
+
+# Points at the B1 scenario rather than restating it. There is no config-merge or
+# inheritance machinery - a run config POINTS AT a scenario file and is otherwise
+# self-contained, so "which world did this run use" is a one-line answer.
+scenario: configs/b1_two_rows.yaml
+
+filter:
+  kind: bernoulli
+
+  # ASSUMPTION: plants do not move. q = 0 means a genuinely static target; raise it very
+  # slightly only if the covariance collapses numerically over a long run.
+  motion: {kind: static, q: 0.0}
+
+  measurement:
+    kind: linear_xy
+    R: [[0.04, 0.0],
+        [0.0, 0.04]]
+
+  # What the FILTER believes about the detector. Deliberately a separate block from the
+  # scenario's `sensor`: setting these to different values is how a model-mismatch
+  # experiment is run, and keeping them separate is why the filter can never be handed the
+  # true parameters by accident.
+  assumed_sensor:
+    fov: {min_range: 0.3, max_range: 4.0, half_angle: 0.6}
+    detection: {kind: constant, p_D: 0.85}
+    lambda_FA: 2.0
+
+  birth:
+    # Seed one Bernoulli component from one detection at one scan. Choose an index that is
+    # clutter in this seed by inspecting labels.jsonl after simulating - the birth model
+    # itself stays truth-blind, so this is the config author's job.
+    kind: single_from_measurement
+    at_scan: 0
+    detection_index: 0
+    r_b: 0.08
+    # Noticeably larger than R: a single measurement localises the target only up to the
+    # measurement noise, and starting over-confident makes the first few updates misleading.
+    init_cov: [[0.25, 0.0],
+               [0.0, 0.25]]
+
+  # ASSUMPTION: plants are permanent. With p_S = 1 the prediction leaves r untouched, so
+  # every bit of decay in the B2 plot is attributable to the detector model rather than to
+  # an assumed death process.
+  survival: {p_S: 1.0}
+
+  gate: {chi2_prob: 0.99}
+
+analysis:
+  b3_reference: bernoulli_existence   # the A2 closed form
+  monte_carlo: {n_runs: 50}           # empirical backing; small by design in phase 1
+  plots: [scene, r_vs_k, r_vs_analytic, r_montecarlo]

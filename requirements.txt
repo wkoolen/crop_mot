@@ -1,0 +1,22 @@
+# Phase-1 dependencies. Keep this list short; anything added needs a justification.
+#
+# numpy<2.0 is a PHASE-2 constraint, not a phase-1 preference: ROS 2 Humble's rclpy does its
+# array interop against the apt-installed NumPy 1.x, and a pip NumPy 2.x in the same
+# interpreter breaks it. Pinning now costs nothing and removes the most likely migration
+# surprise.
+numpy>=1.24,<2.0
+
+# scipy: linear_sum_assignment (GNN / JPDA cost assignment), chi2 (gating thresholds),
+# and multivariate_normal for likelihood evaluation.
+scipy>=1.10,<1.14
+
+matplotlib>=3.7,<4.0
+
+# PyYAML is the one dependency beyond numpy/scipy/matplotlib/pytest.
+# Justification: Python 3.10 has no tomllib (that is 3.11+), so TOML would need `tomli`
+# anyway - equal cost. YAML wins the tie because ROS 2 parameter files are YAML and Humble
+# already ships PyYAML, so phase 2 can feed a node the same config files without a second
+# format.
+PyYAML>=6.0
+
+pytest>=7.4

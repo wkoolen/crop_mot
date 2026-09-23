@@ -1,0 +1,35 @@
+{
+  "name": "crop-mot (phase 1, no ROS)",
+  "build": {
+    "dockerfile": "../Dockerfile",
+    "context": ".."
+  },
+  "workspaceFolder": "/workspace",
+
+  // remoteUser is UID 1000 and must match your WSL distro user's `id -u`, or files created
+  // in the container will be owned by the wrong user on the host. Unlike a Windows bind
+  // mount, a WSL2 Linux bind mount carries real UIDs, so this matters.
+  "remoteUser": "dev",
+
+  // No explicit workspaceMount: because the repo lives in the WSL2 Linux filesystem,
+  // Dev Containers bind-mounts a native Linux path directly, at full speed.
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "charliermarsh.ruff"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/bin/python3",
+        "python.testing.pytestEnabled": true,
+        "python.testing.pytestArgs": ["tests"],
+        "files.eol": "\n"
+      }
+    }
+  },
+
+  // Collect-only proves the wiring imports cleanly without running any NotImplementedError.
+  "postCreateCommand": "python3 -m pytest tests -q --collect-only"
+}

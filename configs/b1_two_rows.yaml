@@ -1,0 +1,61 @@
+# B1 scenario: two plant rows with the robot walking the lane between them.
+#
+# This file plus its seed defines the world completely. Every filter in B2/B4 runs on the
+# detections this scenario produces, so changing anything here invalidates a comparison -
+# make a new file instead of editing this one.
+
+name: b1_two_rows
+seed: 42
+
+world:
+  # Rows run parallel to +y; the robot walks up the lane at x = 0 between them.
+  rows:
+    - {x: -0.75, y_start: 0.0, y_end: 12.0, spacing: 0.35}
+    - {x:  0.75, y_start: 0.0, y_end: 12.0, spacing: 0.35}
+  # Planting irregularity, metres. This is what makes data association non-trivial:
+  # on a perfectly regular grid, nearest-neighbour association would never be ambiguous.
+  position_jitter_std: 0.03
+
+path:
+  kind: straight_lane
+  x: 0.0
+  y_start: -1.0
+  heading: 1.5707963       # +y, radians
+  speed: 0.4               # m/s
+  n_scans: 60
+  scan_period: 0.25        # s; the runner derives dt from the scan timestamps
+
+  # Pose-known switch. TRUE means the reported pose IS the true pose, which is the
+  # assumption B2 and the A2 closed form rely on. The two noise values below are IGNORED
+  # while this is true - they are the extension slot for gait-induced odometry error.
+  pose_known: true
+  yaw_wobble_std: 0.02     # rad, ignored while pose_known: true
+  xy_noise_std: 0.01       # m,   ignored while pose_known: true
+
+# The TRUTH detector. The filter gets its own assumed copy under filter.assumed_sensor in
+# the B2 config, which may deliberately differ from this.
+sensor:
+  # Camera footprint as a wedge in the body frame, matching the top-down scenario sketch.
+  fov: {min_range: 0.3, max_range: 4.0, half_angle: 0.6}   # m, m, rad
+
+  detection:
+    # 'constant' is the profile the A2 closed form is derived under, so it is the default
+    # for B2 and the primary B3 cross-check.
+    kind: constant
+    p_D: 0.85
+    # For kind: range_dependent, replace p_D with these three. That profile models the
+    # occluded plants in the sketch and breaks the constant-p_D assumption - which is fine,
+    # because ScanEvent carries p_D per scan so the same closed form still validates it.
+    # p_D_near: 0.95
+    # p_D_far: 0.55
+    # occlusion_factor: 0.6
+
+  lambda_FA: 2.0           # expected clutter detections per scan (Poisson mean)
+
+  measurement:
+    kind: linear_xy
+    # Measurement noise covariance in m^2. ASSUMPTION: constant and isotropic, because the
+    # detector is assumed to report world-frame xy after un-projecting through the known
+    # pose. A real camera's noise grows with range - see crop_mot/sensor/stereo.py.
+    R: [[0.04, 0.0],
+        [0.0, 0.04]]

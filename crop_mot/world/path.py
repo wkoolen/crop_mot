@@ -1,0 +1,61 @@
+"""The robot's walk, and the pose-known switch. [B1]
+
+This file carries one of the three extension slots that are stubbed but unused in B1-B4.
+The slot matters more than it looks: it fixes whether `Scan.pose` MEANS the true pose or an
+estimate of it. Deciding that after the filters exist would mean revisiting every filter's
+un-projection, so the distinction is written down now even though phase 1 always runs with
+pose_known = True.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import numpy as np
+
+from crop_mot.config import PathConfig
+from crop_mot.types import Pose2D
+
+
+@dataclass(frozen=True)
+class PoseSample:
+    """One time step's true and reported pose. [B1]
+
+    Attributes:
+        t: timestamp in seconds.
+        true: the pose the simulator generates detections from.
+        reported: the pose handed to the filter inside a `Scan`. Identical to `true` when
+            PathConfig.pose_known is True.
+    """
+
+    t: float
+    true: Pose2D
+    reported: Pose2D
+
+
+def generate_path(cfg: PathConfig, rng_path: np.random.Generator) -> list[PoseSample]:
+    """Build the robot's walk along the lane, as (true, reported) pose pairs.
+
+    Phase-1 behaviour, with cfg.pose_known = True: the robot advances at `speed` along the
+    heading, one sample every `scan_period`, for `n_scans` samples. The reported pose IS
+    the true pose and yaw_wobble_std / xy_noise_std are ignored. This is the assumption B2
+    and the A2 closed form rely on.
+
+    EXTENSION SLOT, cfg.pose_known = False: the reported pose is the true pose perturbed by
+    N(0, yaw_wobble_std^2) in heading and N(0, xy_noise_std^2) in position - gait-induced
+    odometry error on a quadruped. Nothing downstream changes shape: detections are still
+    generated from the TRUE pose and the filter still un-projects with the REPORTED one, so
+    the mismatch appears as a measurement bias exactly as it would on the robot. This is not
+    implemented in phase 1 and no config in configs/ enables it.
+
+    Serves: [B1] the pose sequence; [B1 extension] the pose-uncertainty experiment.
+
+    Args:
+        cfg: path geometry, timing, and the pose_known switch.
+        rng_path: the "path" substream generator. Unused while pose_known is True, but
+            still accepted so that flipping the switch does not change the signature.
+
+    Returns:
+        A list of `n_scans` PoseSample entries, ordered by increasing t starting at t = 0.
+    """
+    raise NotImplementedError
