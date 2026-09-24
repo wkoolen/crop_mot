@@ -40,6 +40,8 @@ def compare_r(r_sim: np.ndarray, r_ref: np.ndarray, tol: float = 1e-9) -> RCompa
     disagreement, not sampling error. The statistical question belongs to
     `montecarlo.run_monte_carlo`.
 
+    Scan k is taken to be array position k, i.e. both trajectories start at scan 0.
+
     Args:
         r_sim: shape (K,), the filter's existence probability per scan.
         r_ref: shape (K,), the closed form's, from AnalyticReference.r_sequence.
@@ -52,7 +54,19 @@ def compare_r(r_sim: np.ndarray, r_ref: np.ndarray, tol: float = 1e-9) -> RCompa
         ValueError: if the two arrays have different lengths - which usually means the
             event sequence and the estimates log came from different runs.
     """
-    raise NotImplementedError
+    r_sim = np.asarray(r_sim, dtype=float)
+    r_ref = np.asarray(r_ref, dtype=float)
+    if r_sim.shape != r_ref.shape:
+        raise ValueError(f"r_sim has shape {r_sim.shape} but r_ref has {r_ref.shape}; "
+                         "were the estimates log and the event sequence from different runs?")
+
+    error = np.abs(r_sim - r_ref)
+    diverged = np.flatnonzero(error > tol)
+    return RComparison(
+        max_abs_error=float(error.max()) if error.size else 0.0,
+        rms_error=float(np.sqrt(np.mean(error**2))) if error.size else 0.0,
+        first_divergence_k=int(diverged[0]) if diverged.size else None,
+    )
 
 
 def gospa(

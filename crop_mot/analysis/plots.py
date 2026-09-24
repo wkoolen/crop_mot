@@ -21,7 +21,7 @@ from matplotlib.patches import Wedge
 
 from crop_mot.analysis.estimates_log import read_estimates, r_trajectory
 from crop_mot.analysis.events import gated_detection_indices, predicted_track_moments
-from crop_mot.analysis.montecarlo import MonteCarloResult
+from crop_mot.analysis.montecarlo import MonteCarloResult, standard_error
 from crop_mot.config import (
     RunConfig,
     ScenarioConfig,
@@ -44,6 +44,9 @@ INK_SECONDARY = "#52514e"
 MUTED = "#898781"
 GRID = "#e1e0d9"
 SURFACE = "#ffffff"
+
+# Half-width of the Monte-Carlo confidence band, in standard errors of the mean.
+MC_BAND_SE = 3.0
 
 # matplotlib's Figure API is used directly, never pyplot: no global figure state and no
 # backend that could try to open a window.
@@ -235,7 +238,22 @@ def plot_r_vs_analytic(
     Returns:
         The path written.
     """
-    raise NotImplementedError
+    k = np.arange(len(r_sim))
+    fig, (ax, ax_diff) = _new_figure(n_rows=2, height=5.0, height_ratios=[2.0, 1.0])
+
+    ax.plot(k, r_sim, color=SERIES_1, linewidth=2.0, label="filter r")
+    ax.plot(k, r_ref, color=SERIES_2, linewidth=2.0, linestyle=(0, (4, 3)),
+            label="closed form (A2)")
+    ax.set_ylim(-0.02, 1.02)
+    ax.set_ylabel("existence probability r")
+    ax.set_title(title or "Filter r against the analytic reference", color=INK, fontsize=11)
+    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), frameon=False, fontsize=9)
+
+    ax_diff.axhline(0.0, color=MUTED, linewidth=1.0)
+    ax_diff.plot(k, np.asarray(r_sim) - np.asarray(r_ref), color=SERIES_1, linewidth=2.0)
+    ax_diff.set_xlabel("scan k")
+    ax_diff.set_ylabel("r filter - r closed form")
+    return _save(fig, out)
 
 
 def plot_r_montecarlo(result: MonteCarloResult, r_ref: np.ndarray, out: Path) -> Path:
@@ -254,4 +272,19 @@ def plot_r_montecarlo(result: MonteCarloResult, r_ref: np.ndarray, out: Path) ->
     Returns:
         The path written.
     """
-    raise NotImplementedError
+    k = np.arange(len(result.r_mean))
+    band = MC_BAND_SE * standard_error(result)
+
+    fig, (ax,) = _new_figure()
+    ax.fill_between(k, result.r_mean - band, result.r_mean + band, color=SERIES_1, alpha=0.12,
+                    linewidth=0, label=f"mean \u00b1 {MC_BAND_SE:g} standard errors")
+    ax.plot(k, result.r_mean, color=SERIES_1, linewidth=2.0,
+            label=f"mean r over {result.n_runs} runs")
+    ax.plot(k, r_ref, color=SERIES_2, linewidth=2.0, linestyle=(0, (4, 3)),
+            label="closed form (A2)")
+    ax.set_ylim(-0.02, 1.02)
+    ax.set_xlabel("scan k")
+    ax.set_ylabel("existence probability r")
+    ax.set_title("Monte-Carlo mean r against the closed form", color=INK, fontsize=11)
+    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), frameon=False, fontsize=9)
+    return _save(fig, out)

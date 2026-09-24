@@ -14,12 +14,18 @@ belong to phase 2 on ROS 2.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import tempfile
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
 
+from crop_mot.analysis.estimates_log import read_estimates, r_trajectory
 from crop_mot.config import RunConfig
+from crop_mot.filters import build_filter
+from crop_mot.runner.run_dir import RunDir
+from crop_mot.runner.simulate import simulate
+from crop_mot.runner.track import run_filter
 
 
 @dataclass(frozen=True)
@@ -66,8 +72,38 @@ def run_monte_carlo(
 
     Returns:
         The aggregated result.
+
+    Run i uses seed base_seed + i for the whole scenario (all four substreams), and the r
+    trajectory of the first track the filter reports - all zeros if nothing was born.
+    r_std is the sample standard deviation (ddof = 1), so r_std / sqrt(n_runs) is the usual
+    estimate of the standard error of the mean. The per-run folders live in a temporary
+    directory under runs_base and are deleted afterwards.
     """
-    raise NotImplementedError
+    seeds = tuple(base_seed + i for i in range(n_runs))
+    trajectories = []
+    runs_base.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="montecarlo_", dir=runs_base) as tmp:
+        for seed in seeds:
+            run = RunDir(Path(tmp) / f"seed{seed}")
+            run.plots.mkdir(parents=True)
+            simulate(replace(cfg.scenario, seed=seed), run)
+            flt = build_filter(cfg.filter_cfg)
+            run_filter(flt, run)
+
+            records = read_estimates(run.estimates(flt.name))
+            track_ids = [est.track_id for record in records for est in record.estimates]
+            if track_ids:
+                trajectories.append(r_trajectory(records, track_ids[0]))
+            else:
+                trajectories.append(np.zeros(len(records)))
+
+    r = np.array(trajectories)
+    return MonteCarloResult(
+        r_mean=r.mean(axis=0),
+        r_std=r.std(axis=0, ddof=1) if n_runs > 1 else np.zeros(r.shape[1]),
+        n_runs=n_runs,
+        seeds=seeds,
+    )
 
 
 def standard_error(result: MonteCarloResult) -> np.ndarray:
@@ -82,4 +118,4 @@ def standard_error(result: MonteCarloResult) -> np.ndarray:
     Returns:
         Shape (K,) array of r_std / sqrt(n_runs).
     """
-    raise NotImplementedError
+    return result.r_std / np.sqrt(result.n_runs)
