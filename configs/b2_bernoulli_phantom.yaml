@@ -1,7 +1,7 @@
 # B2 run: a Bernoulli filter seeded from a CLUTTER detection, so r should decay.
 #
-# This is the phantom-track experiment. A track is born at scan 0 from a detection that has
-# no plant behind it; every subsequent scan fails to produce a detection there, and the
+# This is the phantom-track experiment. A track is born from a detection that has no plant
+# behind it; every subsequent scan fails to produce a detection there, and the
 # misdetection branch of the Bernoulli update drives r downward. The resulting r-vs-k curve
 # is the B2 deliverable, and B3 checks it against the hand-derived A2 recursion.
 
@@ -38,14 +38,31 @@ filter:
     # Seed one Bernoulli component from one detection at one scan. Choose an index that is
     # clutter in this seed by inspecting labels.jsonl after simulating - the birth model
     # itself stays truth-blind, so this is the config author's job.
+    #
+    # Seed 42, scan 24, detection 12 is a clutter return at (1.94, 4.82), 1.17 m from the
+    # nearest plant (chosen 2026-09-24). The first choice, scan 0 / detection 0, was
+    # clutter 0.71 m from a plant: its gate reached the plant, the collapse moved the
+    # track onto it, and r went to 1 - a captured phantom, not a decaying one.
+    #
+    # What this run shows, deliberately kept (2026-09-24): r decays from 0.08 to ~2e-4
+    # over scans 24-31, then the phantom is RECAPTURED - r passes 0.5 at k = 37 and goes
+    # to 1. Under collapse: best_branch the branch weights compare r(1 - p_D) with
+    # r p_D N(z; z_hat, S) / (lambda_FA c(z)), so r cancels and the Gaussian jumps to any
+    # detection within ~1 m however small r is; with no pruning the near-dead phantom
+    # wanders onto a plant and is confirmed. (init_cov 0.06 keeps this seed's phantom
+    # dead; pruning below a threshold, A2 §5's deletion, would remove it.)
     kind: single_from_measurement
-    at_scan: 0
-    detection_index: 0
+    at_scan: 24
+    detection_index: 12
+    # PHASE-1 STAND-IN: a configured constant in place of the measurement-driven
+    # r_b = e / (e + lambda_FA c(z)), e = integral lambda_u(x) p_D(x) g(z|x) dx  [A2 §4].
     r_b: 0.08
     # Noticeably larger than R: a single measurement localises the target only up to the
     # measurement noise, and starting over-confident makes the first few updates misleading.
-    init_cov: [[0.25, 0.0],
-               [0.0, 0.25]]
+    # 0.12 = 3 R. With 0.25 the 99% gate spans ~8 m^2 of the 9.5 m^2 FOV and every clutter
+    # return in this seed is captured by a nearby plant.
+    init_cov: [[0.12, 0.0],
+               [0.0, 0.12]]
 
   # ASSUMPTION: plants are permanent. With p_S = 1 the prediction leaves r untouched, so
   # every bit of decay in the B2 plot is attributable to the detector model rather than to
@@ -53,6 +70,11 @@ filter:
   survival: {p_S: 1.0}
 
   gate: {chi2_prob: 0.99}
+
+  # How the post-update mixture (missed branch + one branch per gated detection) collapses
+  # back to one Gaussian. best_branch keeps the highest-weight branch; see
+  # crop_mot/filters/collapse.py for the alternatives' extension point.
+  collapse: best_branch
 
 analysis:
   b3_reference: bernoulli_existence   # the A2 closed form
