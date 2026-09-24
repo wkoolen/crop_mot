@@ -36,6 +36,7 @@ packages = [
 testpaths = ["tests"]
 markers = [
     "slow: Monte-Carlo and other multi-run tests (deselect with '-m \"not slow\"')",
+    "docs: derivation-mirror bookkeeping, no mathematics (see tests/test_derivations_in_sync.py)",
 ]
 
 [tool.ruff]

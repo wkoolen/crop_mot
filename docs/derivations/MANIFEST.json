@@ -1,0 +1,41 @@
+{
+  "generated_by": "scripts/sync_derivations.py",
+  "derivations": [
+    {
+      "tag": "A0",
+      "title": "Measurement modelling and handling clutter",
+      "file": "docs/derivations/A0.md",
+      "source_name": "A0 Measurement modelling and handeling Clutter.md",
+      "source_sha256": "ecf3cda5aeee68ece8962cc0f2aed62cb4e4e5592c52adc26ad31337be8d0bec",
+      "mirror_sha256": "1dbef71875c4d3ca39160705d4c4b53bba60f278e358cef0f417c2d6f17ac82d",
+      "copied_at": "2026-09-23"
+    },
+    {
+      "tag": "A1",
+      "title": "Bayes to Kalman derivation",
+      "file": "docs/derivations/A1.md",
+      "source_name": "A1 Bayes to Kalman Derivation.md",
+      "source_sha256": "2bc217e937d6a493f800450e98f638f6a9aa106ba4415ed07b7b3bc07194901a",
+      "mirror_sha256": "739edfd370a6ed22a5ded84b6c135ae32bc4ec848b7c88cff490bc6ab7949f9d",
+      "copied_at": "2026-09-23"
+    },
+    {
+      "tag": "A2",
+      "title": "Bernoulli existence update",
+      "file": "docs/derivations/A2.md",
+      "source_name": "A2 Bernoulli existence update.md",
+      "source_sha256": "74aac8c7ede51e2cc1ce2e26ca4179b968f010077150c501d3b50981505ac85c",
+      "mirror_sha256": "3de5fc620b0289a2cfd149ae6019d023833aec5486d1799afc8059abae11129c",
+      "copied_at": "2026-09-23"
+    },
+    {
+      "tag": "A3",
+      "title": "Normalisation and pruning across competing global hypotheses",
+      "file": "docs/derivations/A3.md",
+      "source_name": "A3 Normalization and Pruning across competing global Hypotheses.md",
+      "source_sha256": "e335c4dd75ecdbdc033d6fb26239706f78094f13f6feca46025ff0a0d67c8e61",
+      "mirror_sha256": "89a7f27b4539b25face82d48be1bbba63397ab0561a18bedaa3f0f9adde85a3e",
+      "copied_at": "2026-09-23"
+    }
+  ]
+}

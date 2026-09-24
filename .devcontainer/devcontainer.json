@@ -4,6 +4,9 @@
     "dockerfile": "../Dockerfile",
     "context": ".."
   },
+  // workspaceMount must be explicit: without it Dev Containers mounts the repo at
+  // /workspaces/<folder-name>, leaving /workspace (and PYTHONPATH) pointing at an empty dir.
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
   "workspaceFolder": "/workspace",
 
   // remoteUser is UID 1000 and must match your WSL distro user's `id -u`, or files created
@@ -11,8 +14,8 @@
   // mount, a WSL2 Linux bind mount carries real UIDs, so this matters.
   "remoteUser": "dev",
 
-  // No explicit workspaceMount: because the repo lives in the WSL2 Linux filesystem,
-  // Dev Containers bind-mounts a native Linux path directly, at full speed.
+  // The repo lives in the WSL2 Linux filesystem, so the bind mount above is a native
+  // Linux path at full speed (not a slow /mnt/c path).
 
   "customizations": {
     "vscode": {
