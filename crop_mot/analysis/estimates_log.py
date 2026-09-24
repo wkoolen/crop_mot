@@ -100,4 +100,9 @@ def r_trajectory(records: list[ScanEstimates], track_id: int) -> np.ndarray:
     Returns:
         Shape (n_scans,) array of r values, in scan order.
     """
-    raise NotImplementedError
+    r = np.zeros(len(records))
+    for k, record in enumerate(records):
+        for estimate in record.estimates:
+            if estimate.track_id == track_id:
+                r[k] = estimate.r
+    return r
