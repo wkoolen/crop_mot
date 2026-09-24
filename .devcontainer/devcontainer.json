@@ -28,6 +28,7 @@
         "python.defaultInterpreterPath": "/usr/bin/python3",
         "python.testing.pytestEnabled": true,
         "python.testing.pytestArgs": ["tests"],
+        "terminal.integrated.defaultProfile.linux": "bash",
         "files.eol": "\n"
       }
     }
