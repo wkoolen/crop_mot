@@ -13,6 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
+from crop_mot.io import read_jsonl, write_jsonl
 from crop_mot.types import TrackEstimate
 
 
@@ -40,7 +41,18 @@ def write_estimates(path: Path, records: list[ScanEstimates]) -> None:
         path: destination file, from RunDir.estimates(filter_name).
         records: one entry per scan, in increasing k.
     """
-    raise NotImplementedError
+    lines = []
+    for record in records:
+        estimates = []
+        for estimate in record.estimates:
+            estimates.append({
+                "track_id": estimate.track_id,
+                "r": estimate.r,
+                "mean": estimate.mean,
+                "cov": estimate.cov,
+            })
+        lines.append({"k": record.k, "estimates": estimates, "diagnostics": record.diagnostics})
+    write_jsonl(path, lines)
 
 
 def read_estimates(path: Path) -> list[ScanEstimates]:
@@ -54,7 +66,20 @@ def read_estimates(path: Path) -> list[ScanEstimates]:
     Returns:
         The records in file order.
     """
-    raise NotImplementedError
+    records = []
+    for line in read_jsonl(path):
+        estimates = tuple(
+            TrackEstimate(
+                track_id=estimate["track_id"],
+                r=estimate["r"],
+                mean=np.asarray(estimate["mean"], dtype=float),
+                cov=np.asarray(estimate["cov"], dtype=float),
+            )
+            for estimate in line["estimates"]
+        )
+        records.append(ScanEstimates(k=line["k"], estimates=estimates,
+                                     diagnostics=line.get("diagnostics")))
+    return records
 
 
 def r_trajectory(records: list[ScanEstimates], track_id: int) -> np.ndarray:

@@ -17,8 +17,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
+import yaml
 
 from crop_mot.types import FieldOfView
 
@@ -219,12 +221,18 @@ class BirthConfig:
             detection at a chosen scan. For the B2 phantom experiment that detection is a
             clutter return, so r should then decay.
         at_scan: scan index at which to seed. Only used by "single_from_measurement".
-        r_b: birth existence probability r_b assigned to the new component.
+        detection_index: which detection of scan `at_scan` to seed from. Chosen by the
+            config author (by inspecting labels.jsonl), so the birth model stays truth-blind.
+        r_b: birth existence probability r_b assigned to the new component. PHASE-1
+            STAND-IN: a configured constant in place of the measurement-driven
+            r_b = e / (e + lambda_FA c(z)), e = integral lambda_u(x) p_D(x) g(z|x) dx,
+            derived in [A2 §4].
         init_cov: initial covariance for the new component, shape (dim_x, dim_x).
     """
 
     kind: str
     at_scan: int
+    detection_index: int
     r_b: float
     init_cov: np.ndarray
 
@@ -269,6 +277,9 @@ class FilterConfig:
         birth: birth model.
         survival: survival model.
         gate: gating parameters.
+        collapse: how the post-update mixture of branch densities is collapsed back to one
+            Gaussian; a key into `crop_mot.filters.collapse.COLLAPSE_STRATEGIES`. Optional in
+            the YAML, default "best_branch".
     """
 
     kind: str
@@ -278,6 +289,7 @@ class FilterConfig:
     birth: BirthConfig
     survival: SurvivalConfig
     gate: GateConfig
+    collapse: str = "best_branch"
 
 
 # --------------------------------------------------------------------------------------
@@ -354,7 +366,7 @@ def load_scenario_config(path: Path) -> ScenarioConfig:
         ValueError: on an unknown key, a missing required key, or an inconsistent
             combination (e.g. detection.kind == "constant" with no p_D).
     """
-    raise NotImplementedError
+    return _parse_scenario(_read_yaml(path), where=str(path))
 
 
 def load_run_config(path: Path) -> RunConfig:
@@ -375,5 +387,255 @@ def load_run_config(path: Path) -> RunConfig:
     Raises:
         ValueError: on an unknown key, a missing required key, or an unreadable scenario path.
         FileNotFoundError: if the referenced scenario file does not exist.
+
+    A relative `scenario:` path is resolved against the current working directory, i.e. the
+    repo root from which `python3 -m crop_mot` is run.
     """
-    raise NotImplementedError
+    where = str(path)
+    raw = _read_yaml(path)
+    _check_keys(raw, where, required={"name", "seed", "scenario", "filter", "analysis"})
+
+    scenario_path = Path(_as_str(raw["scenario"], f"{where}: scenario"))
+    if not scenario_path.is_absolute():
+        scenario_path = Path.cwd() / scenario_path
+    if not scenario_path.is_file():
+        raise FileNotFoundError(
+            f"{where}: scenario file {raw['scenario']!r} not found (relative paths are "
+            f"resolved against the working directory {Path.cwd()})"
+        )
+
+    return RunConfig(
+        name=_as_str(raw["name"], f"{where}: name"),
+        seed=_as_int(raw["seed"], f"{where}: seed"),
+        scenario=load_scenario_config(scenario_path),
+        filter_cfg=_parse_filter(raw["filter"], f"{where}: filter"),
+        analysis=_parse_analysis(raw["analysis"], f"{where}: analysis"),
+    )
+
+
+# --------------------------------------------------------------------------------------
+# Parsing helpers. Every block is checked against an explicit set of allowed keys, so a
+# typo is an error rather than a silently ignored default.
+# --------------------------------------------------------------------------------------
+
+
+def _read_yaml(path: Path) -> dict[str, Any]:
+    """Read a YAML file whose top level must be a mapping."""
+    raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path}: top level must be a mapping")
+    return raw
+
+
+def _check_keys(
+    block: Any, where: str, required: set[str], optional: set[str] = frozenset()
+) -> None:
+    """Raise ValueError unless `block` is a mapping with exactly the allowed keys."""
+    if not isinstance(block, dict):
+        raise ValueError(f"{where}: expected a mapping, got {type(block).__name__}")
+    unknown = set(block) - required - optional
+    if unknown:
+        raise ValueError(
+            f"{where}: unknown key(s) {sorted(unknown)}; allowed: {sorted(required | optional)}"
+        )
+    missing = required - set(block)
+    if missing:
+        raise ValueError(f"{where}: missing required key(s) {sorted(missing)}")
+
+
+def _as_float(value: Any, where: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{where}: expected a number, got {value!r}")
+    return float(value)
+
+
+def _as_int(value: Any, where: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{where}: expected an integer, got {value!r}")
+    return value
+
+
+def _as_bool(value: Any, where: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{where}: expected true or false, got {value!r}")
+    return value
+
+
+def _as_str(value: Any, where: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{where}: expected a string, got {value!r}")
+    return value
+
+
+def _as_matrix(value: Any, where: str) -> np.ndarray:
+    """A square matrix of numbers, e.g. R or init_cov."""
+    matrix = np.array(value, dtype=float)
+    if matrix.ndim != 2 or matrix.shape[0] != matrix.shape[1]:
+        raise ValueError(f"{where}: expected a square matrix, got shape {matrix.shape}")
+    return matrix
+
+
+def _parse_fov(raw: Any, where: str) -> FieldOfView:
+    _check_keys(raw, where, required={"min_range", "max_range", "half_angle"})
+    fov = FieldOfView(
+        min_range=_as_float(raw["min_range"], f"{where}.min_range"),
+        max_range=_as_float(raw["max_range"], f"{where}.max_range"),
+        half_angle=_as_float(raw["half_angle"], f"{where}.half_angle"),
+    )
+    if not 0.0 <= fov.min_range < fov.max_range or not 0.0 < fov.half_angle <= np.pi:
+        raise ValueError(f"{where}: need 0 <= min_range < max_range and 0 < half_angle <= pi")
+    return fov
+
+
+def _parse_detection(raw: Any, where: str) -> DetectionConfig:
+    if not isinstance(raw, dict) or "kind" not in raw:
+        raise ValueError(f"{where}: expected a mapping with a 'kind' key")
+    kind = raw["kind"]
+    if kind == "constant":
+        _check_keys(raw, where, required={"kind", "p_D"})
+        return DetectionConfig(kind=kind, p_D=_as_float(raw["p_D"], f"{where}.p_D"))
+    if kind == "range_dependent":
+        _check_keys(raw, where, required={"kind", "p_D_near", "p_D_far"},
+                    optional={"occlusion_factor"})
+        return DetectionConfig(
+            kind=kind,
+            p_D_near=_as_float(raw["p_D_near"], f"{where}.p_D_near"),
+            p_D_far=_as_float(raw["p_D_far"], f"{where}.p_D_far"),
+            occlusion_factor=_as_float(raw.get("occlusion_factor", 1.0),
+                                       f"{where}.occlusion_factor"),
+        )
+    raise ValueError(f"{where}.kind: unknown kind {kind!r}; use 'constant' or 'range_dependent'")
+
+
+def _parse_measurement(raw: Any, where: str) -> MeasurementConfig:
+    _check_keys(raw, where, required={"kind", "R"})
+    return MeasurementConfig(kind=_as_str(raw["kind"], f"{where}.kind"),
+                             R=_as_matrix(raw["R"], f"{where}.R"))
+
+
+def _parse_world(raw: Any, where: str) -> WorldConfig:
+    _check_keys(raw, where, required={"rows", "position_jitter_std"})
+    if not isinstance(raw["rows"], list) or not raw["rows"]:
+        raise ValueError(f"{where}.rows: expected a non-empty list")
+    rows = []
+    for i, row in enumerate(raw["rows"]):
+        row_where = f"{where}.rows[{i}]"
+        _check_keys(row, row_where, required={"x", "y_start", "y_end", "spacing"})
+        rows.append(RowConfig(
+            x=_as_float(row["x"], f"{row_where}.x"),
+            y_start=_as_float(row["y_start"], f"{row_where}.y_start"),
+            y_end=_as_float(row["y_end"], f"{row_where}.y_end"),
+            spacing=_as_float(row["spacing"], f"{row_where}.spacing"),
+        ))
+    return WorldConfig(rows=tuple(rows),
+                       position_jitter_std=_as_float(raw["position_jitter_std"],
+                                                     f"{where}.position_jitter_std"))
+
+
+def _parse_path(raw: Any, where: str) -> PathConfig:
+    keys = {"kind", "x", "y_start", "heading", "speed", "n_scans", "scan_period",
+            "pose_known", "yaw_wobble_std", "xy_noise_std"}
+    _check_keys(raw, where, required=keys)
+    return PathConfig(
+        kind=_as_str(raw["kind"], f"{where}.kind"),
+        x=_as_float(raw["x"], f"{where}.x"),
+        y_start=_as_float(raw["y_start"], f"{where}.y_start"),
+        heading=_as_float(raw["heading"], f"{where}.heading"),
+        speed=_as_float(raw["speed"], f"{where}.speed"),
+        n_scans=_as_int(raw["n_scans"], f"{where}.n_scans"),
+        scan_period=_as_float(raw["scan_period"], f"{where}.scan_period"),
+        pose_known=_as_bool(raw["pose_known"], f"{where}.pose_known"),
+        yaw_wobble_std=_as_float(raw["yaw_wobble_std"], f"{where}.yaw_wobble_std"),
+        xy_noise_std=_as_float(raw["xy_noise_std"], f"{where}.xy_noise_std"),
+    )
+
+
+def _parse_sensor(raw: Any, where: str) -> SensorConfig:
+    _check_keys(raw, where, required={"fov", "detection", "lambda_FA", "measurement"})
+    return SensorConfig(
+        fov=_parse_fov(raw["fov"], f"{where}.fov"),
+        detection=_parse_detection(raw["detection"], f"{where}.detection"),
+        lambda_FA=_as_float(raw["lambda_FA"], f"{where}.lambda_FA"),
+        measurement=_parse_measurement(raw["measurement"], f"{where}.measurement"),
+    )
+
+
+def _parse_scenario(raw: Any, where: str) -> ScenarioConfig:
+    _check_keys(raw, where, required={"name", "seed", "world", "path", "sensor"})
+    return ScenarioConfig(
+        name=_as_str(raw["name"], f"{where}: name"),
+        seed=_as_int(raw["seed"], f"{where}: seed"),
+        world=_parse_world(raw["world"], f"{where}: world"),
+        path=_parse_path(raw["path"], f"{where}: path"),
+        sensor=_parse_sensor(raw["sensor"], f"{where}: sensor"),
+    )
+
+
+def _parse_filter(raw: Any, where: str) -> FilterConfig:
+    _check_keys(raw, where,
+                required={"kind", "motion", "measurement", "assumed_sensor", "birth",
+                          "survival", "gate"},
+                optional={"collapse"})
+
+    motion = raw["motion"]
+    _check_keys(motion, f"{where}.motion", required={"kind"}, optional={"q"})
+
+    assumed = raw["assumed_sensor"]
+    _check_keys(assumed, f"{where}.assumed_sensor",
+                required={"fov", "detection", "lambda_FA"})
+
+    birth = raw["birth"]
+    _check_keys(birth, f"{where}.birth",
+                required={"kind", "at_scan", "detection_index", "r_b", "init_cov"})
+
+    survival = raw["survival"]
+    _check_keys(survival, f"{where}.survival", required=set(), optional={"p_S"})
+
+    gate = raw["gate"]
+    _check_keys(gate, f"{where}.gate", required=set(), optional={"chi2_prob"})
+
+    return FilterConfig(
+        kind=_as_str(raw["kind"], f"{where}.kind"),
+        motion=MotionConfig(kind=_as_str(motion["kind"], f"{where}.motion.kind"),
+                            q=_as_float(motion.get("q", 0.0), f"{where}.motion.q")),
+        measurement=_parse_measurement(raw["measurement"], f"{where}.measurement"),
+        assumed_sensor=AssumedSensorConfig(
+            fov=_parse_fov(assumed["fov"], f"{where}.assumed_sensor.fov"),
+            detection=_parse_detection(assumed["detection"],
+                                       f"{where}.assumed_sensor.detection"),
+            lambda_FA=_as_float(assumed["lambda_FA"], f"{where}.assumed_sensor.lambda_FA"),
+        ),
+        birth=BirthConfig(
+            kind=_as_str(birth["kind"], f"{where}.birth.kind"),
+            at_scan=_as_int(birth["at_scan"], f"{where}.birth.at_scan"),
+            detection_index=_as_int(birth["detection_index"],
+                                    f"{where}.birth.detection_index"),
+            r_b=_as_float(birth["r_b"], f"{where}.birth.r_b"),
+            init_cov=_as_matrix(birth["init_cov"], f"{where}.birth.init_cov"),
+        ),
+        survival=SurvivalConfig(p_S=_as_float(survival.get("p_S", 1.0),
+                                              f"{where}.survival.p_S")),
+        gate=GateConfig(chi2_prob=_as_float(gate.get("chi2_prob", 0.99),
+                                            f"{where}.gate.chi2_prob")),
+        collapse=_as_str(raw.get("collapse", "best_branch"), f"{where}.collapse"),
+    )
+
+
+def _parse_analysis(raw: Any, where: str) -> AnalysisConfig:
+    _check_keys(raw, where, required={"b3_reference", "monte_carlo", "plots"})
+
+    b3_reference = raw["b3_reference"]
+    if b3_reference is not None:
+        b3_reference = _as_str(b3_reference, f"{where}.b3_reference")
+
+    monte_carlo = raw["monte_carlo"]
+    if monte_carlo is not None:
+        _check_keys(monte_carlo, f"{where}.monte_carlo", required=set(), optional={"n_runs"})
+        monte_carlo = MonteCarloConfig(n_runs=_as_int(monte_carlo.get("n_runs", 50),
+                                                      f"{where}.monte_carlo.n_runs"))
+
+    if not isinstance(raw["plots"], list):
+        raise ValueError(f"{where}.plots: expected a list of plot names")
+    plots = tuple(_as_str(name, f"{where}.plots") for name in raw["plots"])
+
+    return AnalysisConfig(b3_reference=b3_reference, monte_carlo=monte_carlo, plots=plots)

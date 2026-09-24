@@ -11,6 +11,7 @@ positions for a given seed, no matter what the detector is doing.
 
 from __future__ import annotations
 
+import zlib
 from collections.abc import Sequence
 
 import numpy as np
@@ -35,7 +36,7 @@ def stream_key(name: str) -> int:
     Returns:
         A deterministic non-negative integer, identical across processes and platforms.
     """
-    raise NotImplementedError
+    return zlib.crc32(name.encode("utf-8"))
 
 
 def substreams(seed: int, names: Sequence[str] = STREAM_NAMES) -> dict[str, np.random.Generator]:
@@ -56,4 +57,8 @@ def substreams(seed: int, names: Sequence[str] = STREAM_NAMES) -> dict[str, np.r
     Returns:
         Mapping from name to a freshly seeded np.random.Generator.
     """
-    raise NotImplementedError
+    generators = {}
+    for name in names:
+        seed_sequence = np.random.SeedSequence([seed, stream_key(name)])
+        generators[name] = np.random.default_rng(seed_sequence)
+    return generators

@@ -12,6 +12,7 @@ change.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
@@ -32,7 +33,19 @@ def to_jsonable(obj: Any) -> Any:
     Returns:
         The same structure with arrays as nested lists and numpy scalars as float/int.
     """
-    raise NotImplementedError
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, dict):
+        return {str(key): to_jsonable(value) for key, value in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [to_jsonable(value) for value in obj]
+    return obj
 
 
 def write_jsonl(path: Path, records: Iterable[dict[str, Any]]) -> None:
@@ -48,7 +61,12 @@ def write_jsonl(path: Path, records: Iterable[dict[str, Any]]) -> None:
         path: destination file; parent directories must already exist.
         records: dicts that `to_jsonable` can handle.
     """
-    raise NotImplementedError
+    # json.dumps writes floats with repr(), the shortest string that parses back to the same
+    # float64, so the round trip is exact. allow_nan=False: a NaN in a run file is a bug.
+    with path.open("w", encoding="utf-8", newline="\n") as f:
+        for record in records:
+            f.write(json.dumps(to_jsonable(record), separators=(",", ":"), allow_nan=False))
+            f.write("\n")
 
 
 def read_jsonl(path: Path) -> Iterator[dict[str, Any]]:
@@ -63,4 +81,7 @@ def read_jsonl(path: Path) -> Iterator[dict[str, Any]]:
     Yields:
         One decoded dict per non-empty line, in file order.
     """
-    raise NotImplementedError
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                yield json.loads(line)

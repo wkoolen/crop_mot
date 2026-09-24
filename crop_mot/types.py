@@ -64,14 +64,15 @@ class FieldOfView:
     def area(self) -> float:
         """Area of the wedge in m^2.
 
-        Serves: [B1] as the denominator of a uniform clutter density c(z) = lambda_FA / area,
-        and [B2] the same quantity inside the Bernoulli update.
+        Serves: [B1] as the normaliser of the uniform clutter density c(z) = 1 / area, so that
+        the clutter intensity is lambda_FA * c(z) = lambda_FA / area [A0 §Measurement model];
+        [B2] the same quantity inside the Bernoulli update.
 
         Returns:
             Area of the annular sector between min_range and max_range spanning
-            2 * half_angle radians.
+            2 * half_angle radians: half_angle * (max_range^2 - min_range^2).
         """
-        raise NotImplementedError
+        return self.half_angle * (self.max_range**2 - self.min_range**2)
 
 
 @dataclass(frozen=True)

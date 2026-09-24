@@ -11,9 +11,13 @@ consumers: the filter runner reads only the former, the analysis reads both.
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from pathlib import Path
 
-from crop_mot.types import Scan, ScanLabels
+import numpy as np
+
+from crop_mot.io import read_jsonl, write_jsonl
+from crop_mot.types import Detection, Pose2D, Scan, ScanLabels
 
 
 def write_detections(path: Path, scans: list[Scan]) -> None:
@@ -28,7 +32,15 @@ def write_detections(path: Path, scans: list[Scan]) -> None:
         path: destination detections.jsonl.
         scans: the scans to write, in increasing k.
     """
-    raise NotImplementedError
+    records = []
+    for scan in scans:
+        records.append({
+            "k": scan.k,
+            "t": scan.t,
+            "pose": asdict(scan.pose),
+            "z": [detection.z for detection in scan.detections],
+        })
+    write_jsonl(path, records)
 
 
 def read_detections(path: Path) -> list[Scan]:
@@ -42,7 +54,12 @@ def read_detections(path: Path) -> list[Scan]:
     Returns:
         The scans in file order.
     """
-    raise NotImplementedError
+    scans = []
+    for record in read_jsonl(path):
+        detections = tuple(Detection(z=np.asarray(z, dtype=float)) for z in record["z"])
+        scans.append(Scan(k=record["k"], t=record["t"], pose=Pose2D(**record["pose"]),
+                          detections=detections))
+    return scans
 
 
 def write_labels(path: Path, labels: list[ScanLabels]) -> None:
@@ -55,7 +72,9 @@ def write_labels(path: Path, labels: list[ScanLabels]) -> None:
         path: destination labels.jsonl.
         labels: per-scan origin records, in increasing k.
     """
-    raise NotImplementedError
+    # asdict keeps a clutter origin as None, which JSON writes as null - never as a
+    # sentinel id that could be mistaken for plant 0.
+    write_jsonl(path, [asdict(label) for label in labels])
 
 
 def read_labels(path: Path) -> list[ScanLabels]:
@@ -70,4 +89,12 @@ def read_labels(path: Path) -> list[ScanLabels]:
     Returns:
         The label records in file order.
     """
-    raise NotImplementedError
+    labels = []
+    for record in read_jsonl(path):
+        labels.append(ScanLabels(
+            k=record["k"],
+            origin=tuple(record["origin"]),
+            visible_ids=tuple(record["visible_ids"]),
+            detected_ids=tuple(record["detected_ids"]),
+        ))
+    return labels
