@@ -13,6 +13,7 @@ filter uses, or the two will disagree by a small amount that is easy to mistake 
 from __future__ import annotations
 
 import numpy as np
+from scipy.stats import chi2
 
 
 def chi2_threshold(gate_prob: float, dim_z: int) -> float:
@@ -29,9 +30,11 @@ def chi2_threshold(gate_prob: float, dim_z: int) -> float:
         dim_z: measurement dimension.
 
     Returns:
-        The threshold on d^2 = (z - z_hat)' S^-1 (z - z_hat).
+        The threshold on d^2 = (z - z_hat)' S^-1 (z - z_hat). Under the correct-association
+        hypothesis d^2 is chi-square with dim_z degrees of freedom, so gating is
+        thresholding the log-evidence [A1 §Normaliser — and what it becomes one level up].
     """
-    raise NotImplementedError
+    return float(chi2.ppf(gate_prob, dim_z))
 
 
 def mahalanobis_sq(z: np.ndarray, z_hat: np.ndarray, S: np.ndarray) -> float:
@@ -47,7 +50,8 @@ def mahalanobis_sq(z: np.ndarray, z_hat: np.ndarray, S: np.ndarray) -> float:
     Returns:
         d^2 >= 0.
     """
-    raise NotImplementedError
+    d = z - z_hat
+    return float(d @ np.linalg.solve(S, d))
 
 
 def gate_measurements(
@@ -67,4 +71,5 @@ def gate_measurements(
     Returns:
         Shape (n_gated,) integer array of indices into `measurements`, in increasing order.
     """
-    raise NotImplementedError
+    inside = [i for i, z in enumerate(measurements) if mahalanobis_sq(z, z_hat, S) <= threshold]
+    return np.array(inside, dtype=int)

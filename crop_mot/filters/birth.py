@@ -29,6 +29,16 @@ class SingleFromMeasurement(BirthModel):
     CONFIG author chooses one that happens to be clutter by inspecting labels.jsonl. The
     birth model itself stays truth-blind.
 
+    PHASE-1 STAND-IN: r_b is a configured constant. It stands in for the measurement-driven
+    birth existence r_b = e / (e + lambda_FA c(z)), e = integral lambda_u(x) p_D(x) g(z|x) dx,
+    derived in [A2 §4]. That version will be a NEW BirthModel class next to this one, not an
+    edit to it.
+
+    How the Bernoulli filter uses the component (decision D3): births are applied AFTER the
+    measurement update of scan `at_scan`, only into an empty Bernoulli (r == 0), and the
+    seeding detection is not used to update the new component in the same scan - so the
+    reported r at the birth scan is exactly r_b.
+
     Attributes:
         at_scan: the scan index at which to seed.
         detection_index: which detection in that scan to seed from.
@@ -53,7 +63,10 @@ class SingleFromMeasurement(BirthModel):
             A single (r_b, mean, init_cov) triple when scan.k == at_scan and that detection
             exists; an empty list on every other scan.
         """
-        raise NotImplementedError
+        if scan.k != self.at_scan or self.detection_index >= len(scan.detections):
+            return []
+        z = scan.detections[self.detection_index].z
+        return [(self.r_b, z.copy(), self.init_cov.copy())]
 
 
 @dataclass(frozen=True)
@@ -74,4 +87,4 @@ class NoBirth(BirthModel):
         Returns:
             An empty list.
         """
-        raise NotImplementedError
+        return []

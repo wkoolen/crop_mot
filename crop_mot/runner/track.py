@@ -7,11 +7,16 @@ filter maintains hypotheses. The same nine lines run Bernoulli today and PMBM in
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
-from crop_mot.config import RunConfig
+from crop_mot.analysis.estimates_log import ScanEstimates, write_estimates
+from crop_mot.config import RunConfig, load_run_config
+from crop_mot.filters import FILTERS, build_filter
 from crop_mot.filters.base import TrackingFilter
-from crop_mot.runner.run_dir import RunDir
+from crop_mot.runner.run_dir import RunDir, create_run_dir
+from crop_mot.runner.simulate import simulate
+from crop_mot.sensor.record import read_detections
 
 
 def run_filter(flt: TrackingFilter, run: RunDir) -> None:
@@ -43,7 +48,18 @@ def run_filter(flt: TrackingFilter, run: RunDir) -> None:
         run: the run folder holding detections.jsonl; estimates_<flt.name>.jsonl is written
             into the same folder.
     """
-    raise NotImplementedError
+    records = []
+    state = flt.initial_state()
+    previous_t = None
+    for scan in read_detections(run.detections):
+        dt = 0.0 if previous_t is None else scan.t - previous_t
+        previous_t = scan.t
+        state = flt.predict(state, dt)
+        state = flt.update(state, scan)
+        diagnostics = flt.diagnostics(state) if hasattr(flt, "diagnostics") else None
+        records.append(ScanEstimates(k=scan.k, estimates=tuple(flt.extract(state)),
+                                     diagnostics=diagnostics))
+    write_estimates(run.estimates(flt.name), records)
 
 
 def track_from_config(config_path: Path, runs_base: Path, run_dir: Path | None = None) -> RunDir:
@@ -64,8 +80,20 @@ def track_from_config(config_path: Path, runs_base: Path, run_dir: Path | None =
 
     Raises:
         FileNotFoundError: if run_dir is given but contains no detections.jsonl.
+
+    A fresh run folder is named after the RUN config and holds a copy of it; the scenario
+    is simulated with its own seed, i.e. exactly as `simulate` on that scenario would.
     """
-    raise NotImplementedError
+    cfg = load_run_config(config_path)
+    if run_dir is None:
+        run = create_run_dir(runs_base, cfg.name, cfg.seed, config_path)
+        simulate(cfg.scenario, run)
+    else:
+        run = RunDir(run_dir)
+        if not run.detections.is_file():
+            raise FileNotFoundError(f"{run.detections} does not exist; simulate first")
+    run_filter(build_filter(cfg.filter_cfg), run)
+    return run
 
 
 def track_all_filters(cfg: RunConfig, run: RunDir, filter_names: list[str]) -> None:
@@ -85,4 +113,8 @@ def track_all_filters(cfg: RunConfig, run: RunDir, filter_names: list[str]) -> N
     Raises:
         KeyError: if any name is not registered in FILTERS.
     """
-    raise NotImplementedError
+    unknown = [name for name in filter_names if name not in FILTERS]
+    if unknown:
+        raise KeyError(f"unknown filter(s) {unknown}; available: {sorted(FILTERS)}")
+    for name in filter_names:
+        run_filter(build_filter(replace(cfg.filter_cfg, kind=name)), run)

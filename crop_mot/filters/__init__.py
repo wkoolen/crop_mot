@@ -46,4 +46,6 @@ def build_filter(cfg: FilterConfig) -> TrackingFilter:
         KeyError: if cfg.kind is not in FILTERS. The message should list the available
             names, since a typo here is otherwise a confusing failure.
     """
-    raise NotImplementedError
+    if cfg.kind not in FILTERS:
+        raise KeyError(f"unknown filter {cfg.kind!r}; available: {sorted(FILTERS)}")
+    return FILTERS[cfg.kind](cfg)

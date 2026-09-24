@@ -36,7 +36,7 @@ def kf_predict(
     Returns:
         Tuple (predicted mean, predicted covariance).
     """
-    raise NotImplementedError
+    return motion.predict_moments(mean, cov, dt)
 
 
 def predicted_measurement(
@@ -59,7 +59,10 @@ def predicted_measurement(
     Returns:
         Tuple (z_hat of shape (dim_z,), S of shape (dim_z, dim_z)).
     """
-    raise NotImplementedError
+    H = model.H(mean, pose)
+    z_hat = model.h(mean, pose)
+    S = H @ cov @ H.T + model.R
+    return z_hat, S
 
 
 def kf_update(
@@ -70,6 +73,11 @@ def kf_update(
     pose: Pose2D,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Kalman measurement update for a single measurement.
+
+    Implements [A1 §Result (Kalman filter update)]: S = H P H' + R, K = P H' S^-1,
+    m+ = m + K (z - z_hat). The covariance uses the Joseph form
+    P+ = (I - K H) P (I - K H)' + K R K', which equals A1's P+ = (I - K H) P for the optimal
+    K but stays symmetric positive definite under rounding; the result is also symmetrised.
 
     Should use the Joseph form for the covariance update, or at minimum symmetrise the
     result. With a static target and p_S = 1 the covariance shrinks monotonically over a
@@ -88,7 +96,15 @@ def kf_update(
     Returns:
         Tuple (posterior mean, posterior covariance).
     """
-    raise NotImplementedError
+    z_hat, S = predicted_measurement(mean, cov, model, pose)
+    H = model.H(mean, pose)
+    K = cov @ H.T @ np.linalg.inv(S)
+
+    mean_post = mean + K @ (z - z_hat)
+    I_KH = np.eye(len(mean)) - K @ H
+    cov_post = I_KH @ cov @ I_KH.T + K @ model.R @ K.T
+    cov_post = 0.5 * (cov_post + cov_post.T)
+    return mean_post, cov_post
 
 
 def log_predicted_likelihood(
@@ -109,6 +125,10 @@ def log_predicted_likelihood(
         S: shape (dim_z, dim_z), the innovation covariance.
 
     Returns:
-        The natural log of the Gaussian density evaluated at z.
+        The natural log of the Gaussian density evaluated at z:
+        ln N(z; z_hat, S) = -1/2 [d' S^-1 d + ln|2 pi S|], d = z - z_hat
+        [A1 §Normaliser — and what it becomes one level up].
     """
-    raise NotImplementedError
+    d = z - z_hat
+    _, logdet_2piS = np.linalg.slogdet(2.0 * np.pi * S)
+    return float(-0.5 * (d @ np.linalg.solve(S, d) + logdet_2piS))

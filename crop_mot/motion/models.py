@@ -59,3 +59,11 @@ class StaticTarget(MotionModel):
 
     q: float = 0.0
     dim_x: int = 2
+
+    def predict_moments(
+        self, mean: np.ndarray, cov: np.ndarray, dt: float
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """m <- F m = m and P <- F P F' + Q = P + q dt I, with F = I
+        [A1 §The prediction step is CK, evaluated]. Returns new arrays."""
+        Q = self.q * dt * np.eye(self.dim_x)
+        return mean.copy(), cov + Q
