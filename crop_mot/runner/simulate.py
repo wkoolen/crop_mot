@@ -7,10 +7,19 @@ every re-analysis - works from those files.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
-from crop_mot.config import ScenarioConfig
-from crop_mot.runner.run_dir import RunDir
+from crop_mot.config import ScenarioConfig, load_scenario_config
+from crop_mot.rng import substreams
+from crop_mot.runner.run_dir import RunDir, create_run_dir, write_run_meta
+from crop_mot.sensor.detector import sample_scan
+from crop_mot.sensor.models import build_measurement_model
+from crop_mot.sensor.record import write_detections, write_labels
+from crop_mot.sensor.sensor_model import build_sensor_model
+from crop_mot.world.field import generate_field
+from crop_mot.world.path import generate_path
+from crop_mot.world.truth import GroundTruth, write_truth
 
 
 def simulate(cfg: ScenarioConfig, run: RunDir) -> None:
@@ -35,7 +44,27 @@ def simulate(cfg: ScenarioConfig, run: RunDir) -> None:
         cfg: the parsed scenario configuration.
         run: an existing run folder to write into.
     """
-    raise NotImplementedError
+    streams = substreams(cfg.seed)
+    field = generate_field(cfg.world, streams["field"])
+    poses = generate_path(cfg.path, streams["path"])
+    truth = GroundTruth(field=field, poses=poses)
+
+    measurement = build_measurement_model(cfg.sensor.measurement)
+    model = build_sensor_model(cfg.sensor.fov, cfg.sensor.detection, cfg.sensor.lambda_FA,
+                               measurement)
+
+    scans = []
+    labels = []
+    for k, sample in enumerate(poses):
+        scan, label = sample_scan(truth, sample.true, k, sample.t, model,
+                                  streams["detection"], streams["clutter"])
+        scans.append(scan)
+        labels.append(label)
+
+    write_truth(run.truth, truth)
+    write_labels(run.labels, labels)
+    write_detections(run.detections, scans)
+    write_run_meta(run, cfg.seed, sys.argv)
 
 
 def simulate_from_config(config_path: Path, runs_base: Path) -> RunDir:
@@ -50,4 +79,7 @@ def simulate_from_config(config_path: Path, runs_base: Path) -> RunDir:
     Returns:
         The run folder that was created and populated.
     """
-    raise NotImplementedError
+    cfg = load_scenario_config(config_path)
+    run = create_run_dir(runs_base, cfg.name, cfg.seed, config_path)
+    simulate(cfg, run)
+    return run

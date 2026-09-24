@@ -19,8 +19,17 @@ the same directory, and the fact that they saw identical data is visible in the 
 
 from __future__ import annotations
 
+import json
+import platform
+import shutil
+import subprocess
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from importlib import metadata
 from pathlib import Path
+
+# The repository root, for asking git which commit produced a run.
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 @dataclass(frozen=True)
@@ -36,37 +45,37 @@ class RunDir:
     @property
     def config(self) -> Path:
         """Path to the verbatim config copy."""
-        raise NotImplementedError
+        return self.root / "config.yaml"
 
     @property
     def meta(self) -> Path:
         """Path to run_meta.json."""
-        raise NotImplementedError
+        return self.root / "run_meta.json"
 
     @property
     def truth(self) -> Path:
         """Path to truth.jsonl. EVALUATION ONLY - never handed to a filter."""
-        raise NotImplementedError
+        return self.root / "truth.jsonl"
 
     @property
     def labels(self) -> Path:
         """Path to labels.jsonl. EVALUATION ONLY - never handed to a filter."""
-        raise NotImplementedError
+        return self.root / "labels.jsonl"
 
     @property
     def detections(self) -> Path:
         """Path to detections.jsonl - the only input a filter is given."""
-        raise NotImplementedError
+        return self.root / "detections.jsonl"
 
     @property
     def metrics(self) -> Path:
         """Path to metrics.json."""
-        raise NotImplementedError
+        return self.root / "metrics.json"
 
     @property
     def plots(self) -> Path:
         """Path to the plots/ subdirectory."""
-        raise NotImplementedError
+        return self.root / "plots"
 
     def estimates(self, filter_name: str) -> Path:
         """Path to estimates_<filter_name>.jsonl.
@@ -81,7 +90,7 @@ class RunDir:
         Returns:
             The estimates log path for that filter.
         """
-        raise NotImplementedError
+        return self.root / f"estimates_{filter_name}.jsonl"
 
 
 def create_run_dir(base: Path, name: str, seed: int, config_source: Path) -> RunDir:
@@ -101,8 +110,24 @@ def create_run_dir(base: Path, name: str, seed: int, config_source: Path) -> Run
 
     Returns:
         The created RunDir, with plots/ already created.
+
+    The timestamp is UTC. If a folder with the same name already exists (two runs started
+    within the same second, e.g. in a test), a suffix _1, _2, ... is appended rather than
+    overwriting it.
     """
-    raise NotImplementedError
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
+    stem = f"{stamp}_{name}_seed{seed}"
+    root = base / stem
+    suffix = 0
+    while root.exists():
+        suffix += 1
+        root = base / f"{stem}_{suffix}"
+
+    root.mkdir(parents=True)
+    run = RunDir(root)
+    shutil.copyfile(config_source, run.config)
+    run.plots.mkdir()
+    return run
 
 
 def write_run_meta(run: RunDir, seed: int, argv: list[str]) -> None:
@@ -122,4 +147,38 @@ def write_run_meta(run: RunDir, seed: int, argv: list[str]) -> None:
         seed: the seed used.
         argv: sys.argv of the invoking process.
     """
-    raise NotImplementedError
+    meta = {
+        "seed": seed,
+        "git_sha": _git(["rev-parse", "HEAD"]),
+        "git_dirty": None,
+        "python": platform.python_version(),
+        "packages": {name: _package_version(name)
+                     for name in ("numpy", "scipy", "matplotlib", "PyYAML")},
+        "argv": list(argv),
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    status = _git(["status", "--porcelain"])
+    if status is not None:
+        meta["git_dirty"] = status != ""
+
+    with run.meta.open("w", encoding="utf-8", newline="\n") as f:
+        json.dump(meta, f, indent=2)
+        f.write("\n")
+
+
+def _git(args: list[str]) -> str | None:
+    """Output of a git command in the repo, or None if git is unavailable."""
+    try:
+        result = subprocess.run(["git", *args], cwd=REPO_ROOT, capture_output=True,
+                                text=True, check=True)
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return result.stdout.strip()
+
+
+def _package_version(name: str) -> str | None:
+    """Installed version of a distribution, without importing it."""
+    try:
+        return metadata.version(name)
+    except metadata.PackageNotFoundError:
+        return None

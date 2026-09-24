@@ -17,6 +17,13 @@ Subcommands:
 from __future__ import annotations
 
 import argparse
+import sys
+from pathlib import Path
+
+from crop_mot.runner.analyse import analyse_run
+from crop_mot.runner.run_dir import RunDir
+from crop_mot.runner.simulate import simulate_from_config
+from crop_mot.runner.track import track_from_config
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -26,7 +33,27 @@ def build_parser() -> argparse.ArgumentParser:
         A parser with `simulate`, `track` and `analyse` subcommands, each taking the
         arguments its runner function needs.
     """
-    raise NotImplementedError
+    parser = argparse.ArgumentParser(prog="python3 -m crop_mot",
+                                     description="Crop-row MOT simulator and filters.")
+    commands = parser.add_subparsers(dest="command", required=True)
+
+    simulate = commands.add_parser("simulate", help="[B1] scenario config -> run folder")
+    simulate.add_argument("--config", type=Path, required=True, help="B1 scenario YAML")
+    simulate.add_argument("--runs", type=Path, default=Path("runs"),
+                          help="directory holding run folders (default: runs)")
+
+    track = commands.add_parser("track", help="[B2] run a filter over recorded detections")
+    track.add_argument("--config", type=Path, required=True, help="B2 run YAML")
+    track.add_argument("--run", type=Path, default=None,
+                       help="existing run folder to reuse; omit to simulate a fresh one")
+    track.add_argument("--runs", type=Path, default=Path("runs"),
+                       help="directory holding run folders (default: runs)")
+
+    analyse = commands.add_parser("analyse", help="[B2/B3] plots and metrics for a run")
+    analyse.add_argument("--run", type=Path, required=True, help="run folder to analyse")
+    analyse.add_argument("--plots", nargs="+", default=None,
+                         help="plots to render; default: the config's analysis.plots")
+    return parser
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -38,7 +65,20 @@ def main(argv: list[str] | None = None) -> int:
     Returns:
         A process exit code: 0 on success, non-zero on a handled error.
     """
-    raise NotImplementedError
+    args = build_parser().parse_args(argv)
+    try:
+        if args.command == "simulate":
+            run = simulate_from_config(args.config, args.runs)
+        elif args.command == "track":
+            run = track_from_config(args.config, args.runs, args.run)
+        else:
+            run = RunDir(args.run)
+            analyse_run(run, plots=args.plots)
+    except (ValueError, KeyError, FileNotFoundError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+    print(run.root)
+    return 0
 
 
 if __name__ == "__main__":
