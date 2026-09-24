@@ -13,6 +13,7 @@ from typing import Protocol
 
 import numpy as np
 
+from crop_mot.config import MeasurementConfig
 from crop_mot.types import Pose2D
 
 
@@ -86,3 +87,31 @@ class LinearGaussianXY(MeasurementModel):
     R: np.ndarray
     dim_x: int = 2
     dim_z: int = 2
+
+    def h(self, x: np.ndarray, pose: Pose2D) -> np.ndarray:
+        """z_hat = H x; the pose is not needed because z is already in world xy."""
+        return self.H(x, pose) @ x
+
+    def H(self, x: np.ndarray, pose: Pose2D) -> np.ndarray:
+        """H = I_2, independent of x and pose."""
+        return np.eye(self.dim_z, self.dim_x)
+
+
+def build_measurement_model(cfg: MeasurementConfig) -> MeasurementModel:
+    """Construct the measurement model named by cfg.kind. [B1/B2]
+
+    Used by the simulator (truth `sensor.measurement`), by the filter (`filter.measurement`)
+    and by the B3 analysis, so all three build the model the same way.
+
+    Args:
+        cfg: a `measurement:` config block.
+
+    Returns:
+        The measurement model.
+
+    Raises:
+        ValueError: if cfg.kind is unknown.
+    """
+    if cfg.kind == "linear_xy":
+        return LinearGaussianXY(R=cfg.R)
+    raise ValueError(f"unknown measurement kind {cfg.kind!r}; phase 1 has only 'linear_xy'")
