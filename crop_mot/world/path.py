@@ -57,5 +57,28 @@ def generate_path(cfg: PathConfig, rng_path: np.random.Generator) -> list[PoseSa
 
     Returns:
         A list of `n_scans` PoseSample entries, ordered by increasing t starting at t = 0.
+
+    Raises:
+        ValueError: if cfg.kind is not "straight_lane".
+        NotImplementedError: if cfg.pose_known is False (the extension slot above).
     """
-    raise NotImplementedError
+    if cfg.kind != "straight_lane":
+        raise ValueError(f"unknown path kind {cfg.kind!r}; phase 1 has only 'straight_lane'")
+    if not cfg.pose_known:
+        raise NotImplementedError(
+            "pose_known: false is the gait-wobble EXTENSION SLOT and is not implemented in "
+            "phase 1; B2 and the A2 closed form assume the reported pose is the true pose."
+        )
+
+    samples = []
+    for k in range(cfg.n_scans):
+        t = k * cfg.scan_period
+        distance = cfg.speed * t
+        true_pose = Pose2D(
+            x=cfg.x + distance * np.cos(cfg.heading),
+            y=cfg.y_start + distance * np.sin(cfg.heading),
+            theta=cfg.heading,
+        )
+        # pose_known: the reported pose IS the true pose; rng_path is not drawn from.
+        samples.append(PoseSample(t=t, true=true_pose, reported=true_pose))
+    return samples

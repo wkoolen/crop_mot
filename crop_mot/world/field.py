@@ -52,4 +52,20 @@ def generate_field(cfg: WorldConfig, rng_field: np.random.Generator) -> PlantFie
     Returns:
         A PlantField with ids assigned 0..n_plants-1 in row-major order.
     """
-    raise NotImplementedError
+    nominal = []
+    row_index = []
+    for i, row in enumerate(cfg.rows):
+        # Plants at y_start, y_start + spacing, ... up to and including y_end. The small
+        # tolerance keeps a plant exactly at y_end despite floating-point division.
+        n_in_row = int(np.floor((row.y_end - row.y_start) / row.spacing + 1e-9)) + 1
+        for j in range(n_in_row):
+            nominal.append([row.x, row.y_start + j * row.spacing])
+            row_index.append(i)
+
+    nominal = np.array(nominal, dtype=float)
+    jitter = rng_field.normal(0.0, cfg.position_jitter_std, size=nominal.shape)
+    return PlantField(
+        ids=np.arange(len(nominal)),
+        positions=nominal + jitter,
+        row_index=np.array(row_index, dtype=int),
+    )
