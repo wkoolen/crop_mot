@@ -32,11 +32,14 @@ def _simulate_into(cfg: ScenarioConfig, root) -> RunDir:
 
 
 def _standing_still(cfg: ScenarioConfig, n_scans: int) -> ScenarioConfig:
-    """The tiny scenario with the robot parked at y = 2, where all five plants are in view.
+    """The tiny scenario with the robot parked at y = 2.3, where all five plants are in view.
 
     Gives thousands of visible-plant samples for the statistical tests without a long row.
+    Parked so every plant is about 3 sigma of the measurement noise (0.6 m) inside the
+    wedge: the detector drops a z that lands outside the FOV, so a plant near the edge has
+    an effective detection rate below p_D, which would bias the p_D test.
     """
-    return replace(cfg, path=replace(cfg.path, y_start=2.0, speed=0.0, n_scans=n_scans))
+    return replace(cfg, path=replace(cfg.path, y_start=2.3, speed=0.0, n_scans=n_scans))
 
 
 def test_same_seed_reproduces_detections_exactly(
@@ -85,16 +88,10 @@ def test_changing_clutter_rate_does_not_move_the_plants(
 
 
 def test_no_detection_outside_the_fov(tiny_scenario: ScenarioConfig, tmp_path) -> None:
-    """Clutter lies inside the FOV wedge, and so does the source of every real detection. [B1]
+    """Every detection, real or clutter, lies inside the FOV wedge at its scan's pose. [B1]
 
     Catches sign errors in the body-frame transform, which otherwise show up much later as
     an inexplicably bad tracking result.
-
-    Checked per origin (decision D4, 2026-09-24): a clutter detection's z must lie inside
-    the wedge at its scan's pose; a real detection's z need not, because A0's model adds
-    N(0, R) noise without truncation, so a plant just inside the edge can be reported just
-    outside it. What must lie inside the wedge is the PLANT that produced it. Also checks
-    that `visible_ids` is exactly the set of plants inside the wedge.
     """
     walk_past = replace(tiny_scenario, path=replace(tiny_scenario.path, n_scans=60))
     run = _simulate_into(walk_past, tmp_path / "run")
@@ -108,13 +105,12 @@ def test_no_detection_outside_the_fov(tiny_scenario: ScenarioConfig, tmp_path) -
     n_real = 0
     for scan, label, sample in zip(scans, labels, truth.poses):
         for detection, origin in zip(scan.detections, label.origin):
+            assert in_fov(detection.z, sample.true, fov), f"detection outside FOV, k={scan.k}"
             if origin is None:
                 n_clutter += 1
-                assert in_fov(detection.z, sample.true, fov), f"clutter outside FOV, k={scan.k}"
             else:
                 n_real += 1
-                assert in_fov(position_of[origin], sample.true, fov), (
-                    f"detection from plant {origin} outside FOV, k={scan.k}")
+                assert in_fov(position_of[origin], sample.true, fov)
         in_view = {i for i, x in position_of.items() if in_fov(x, sample.true, fov)}
         assert set(label.visible_ids) == in_view
     assert n_clutter > 0 and n_real > 0

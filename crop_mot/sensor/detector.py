@@ -32,9 +32,13 @@ def sample_scan(
     [A0 §Measurement model]:
       1. For each plant, test visibility against the FOV using the TRUE pose.
       2. Each visible plant is detected independently with probability p_D(x, pose).
-      3. A detected plant produces z = h(x, pose) + v with v ~ N(0, R). z is NOT truncated
-         to the FOV: near the edge, noise can place a real detection just outside it,
-         exactly as A0's model allows.
+      3. A detected plant produces z = h(x, pose) + v with v ~ N(0, R). A z that falls
+         OUTSIDE the FOV is not reported: the camera cannot report outside its image, so
+         the FOV is the measurement space and c(z) is a proper pdf on it (decision D4,
+         revised 2026-09-24). Consequence, deliberately NOT modelled by the filter's p_D:
+         a plant within a few sigma of the FOV edge is effectively detected with
+         probability p_D(x) * P(x + v in FOV) < p_D(x). Such a plant counts as visible
+         but not detected in the labels.
       4. Independently, draw n_clutter ~ Poisson(lambda_FA) false alarms, positioned
          uniformly over the FOV area.
       5. SORT all detections together by z (lexicographically) before returning, so that
@@ -80,9 +84,10 @@ def sample_scan(
         visible_ids.append(int(plant_id))
         u = rng_detect.random()
         v = rng_detect.multivariate_normal(np.zeros(R.shape[0]), R)
-        if u < model.p_D(x, pose):
+        z = model.measurement.h(x, pose) + v
+        if u < model.p_D(x, pose) and in_fov(z, pose, model.fov):
             detected_ids.append(int(plant_id))
-            z_list.append(model.measurement.h(x, pose) + v)
+            z_list.append(z)
             origin_list.append(int(plant_id))
 
     n_clutter = rng_clutter.poisson(model.lambda_FA(pose))
