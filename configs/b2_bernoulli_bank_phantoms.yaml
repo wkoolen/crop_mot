@@ -1,0 +1,67 @@
+# B2 run: a bank of independent Bernoulli filters, each seeded from a CLUTTER detection in
+# empty space, with pruning. The hypothesis-history experiment (decisions D12-D14).
+#
+# The single-phantom run (b2_bernoulli_phantom.yaml) follows one track and never deletes
+# it, so its phantom is eventually recaptured by a plant (D9). This run follows several
+# phantoms at once and deletes each one whose r falls below prune.r_min - A2 §5's
+# "look-and-miss ratchets r down until it is deleted". Because r_min > 0, `track` also
+# writes estimates_bernoulli_bank_unpruned.jsonl: the same filter without pruning, on the
+# same detections, which the `hypotheses` plot draws after each deletion.
+
+name: b2_bernoulli_bank_phantoms
+seed: 42
+
+scenario: configs/b1_two_rows.yaml
+
+filter:
+  # Independent Bernoulli components, one per seed, each advanced by the unchanged
+  # `bernoulli` filter. They do not compete for detections - fine while the seeds are more
+  # than a gate apart, which the candidates command checks.
+  kind: bernoulli_bank
+
+  motion: {kind: static, q: 0.0}
+
+  measurement:
+    kind: linear_xy
+    R: [[0.04, 0.0],
+        [0.0, 0.04]]
+
+  # Identical to b2_bernoulli_phantom.yaml, so seed (24, 12) reproduces that run's track.
+  assumed_sensor:
+    fov: {min_range: 0.3, max_range: 4.0, half_angle: 0.6}
+    detection: {kind: constant, p_D: 0.85}
+    lambda_FA: 2.0
+
+  birth:
+    kind: from_measurements
+    # Every clutter return of seed 42 at least 1.0 m from any plant and 1.0 m from each
+    # other, from (2026-09-28):
+    #   python3 -m crop_mot candidates --run runs/<stamp>_b1_two_rows_seed42
+    # The list position is the track id.
+    seeds:
+      - {at_scan: 7,  detection_index: 16}   # #0 (1.81, 3.10), 1.01 m from a plant, 7 later in-view scans
+      - {at_scan: 24, detection_index: 12}   # #1 (1.94, 4.82), 1.17 m: D8's phantom, recaptured at k = 37 when unpruned (D9)
+      - {at_scan: 38, detection_index: 0}    # #2 (-2.01, 5.82), 1.26 m: never in view again, so r freezes at r_b
+      - {at_scan: 40, detection_index: 13}   # #3 (1.88, 6.35), 1.13 m, 5 later in-view scans
+      - {at_scan: 47, detection_index: 0}    # #4 (-1.77, 7.01), 1.03 m, 7 later in-view scans
+    r_b: 0.08
+    init_cov: [[0.12, 0.0],
+               [0.0, 0.12]]
+
+  survival: {p_S: 1.0}
+
+  gate: {chi2_prob: 0.99}
+
+  collapse: best_branch
+
+  # A2 §5's deletion (D13): a component whose predicted r is below r_min is removed. With
+  # p_D = 0.85 an in-view miss multiplies the odds r / (1 - r) by 0.15, so r_b = 0.08
+  # falls below 1e-3 after about three in-view misses.
+  prune: {r_min: 1.0e-3}
+
+analysis:
+  # The bank is not what B3's closed form describes (several tracks, pruning), so no
+  # cross-check here; one-seed banks are checked against the single filter in the tests.
+  b3_reference: null
+  monte_carlo: null
+  plots: [scene, hypotheses]

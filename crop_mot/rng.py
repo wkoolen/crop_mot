@@ -18,7 +18,7 @@ import numpy as np
 
 # The substreams the pipeline uses. Adding a name here is cheap; renaming one changes every
 # run's output for a given seed, so treat these as part of the reproducibility contract.
-STREAM_NAMES: tuple[str, ...] = ("field", "path", "detection", "clutter")
+STREAM_NAMES: tuple[str, ...] = ("field", "path", "detection", "clutter", "multiplicity")
 
 
 def stream_key(name: str) -> int:
@@ -47,7 +47,8 @@ def substreams(seed: int, names: Sequence[str] = STREAM_NAMES) -> dict[str, np.r
     created - unlike SeedSequence.spawn(), where inserting a new stream shifts the others.
 
     Serves: [B1] the simulator draws plant jitter from "field", pose noise from "path",
-    detection coin flips from "detection" and clutter from "clutter";
+    detection coin flips from "detection", clutter from "clutter", and the extra hits of
+    a multi-detection scenario from "multiplicity";
     [B3] `run_monte_carlo` varies the top-level seed and reuses this function.
 
     Args:

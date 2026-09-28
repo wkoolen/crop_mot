@@ -1,10 +1,12 @@
-# B1 scenario: two plant rows with the robot walking the lane between them.
+# B1 scenario: b1_two_rows with plants as EXTENDED objects (Poisson hits per plant).
+# Identical to b1_two_rows.yaml except for name and sensor.multiplicity. detection.p_D is
+# not used under kind: poisson. For the same seed the plants and the clutter match.
 #
 # This file plus its seed defines the world completely. Every filter in B2/B4 runs on the
 # detections this scenario produces, so changing anything here invalidates a comparison -
 # make a new file instead of editing this one.
 
-name: b1_two_rows
+name: b1_two_rows_extended
 seed: 42
 
 world:
@@ -60,7 +62,9 @@ sensor:
   #   poisson:   extended objects, Poisson(gamma) hits per visible plant
   #              (gamma, extent_std; detection.p_D is then unused)
   multiplicity:
-    kind: single
+    kind: poisson
+    gamma: 3.0             # expected hits per visible plant; missed with prob exp(-3) = 0.05
+    extent_std: 0.08       # m, isotropic plant extent, added to the measurement noise R
 
   measurement:
     kind: linear_xy

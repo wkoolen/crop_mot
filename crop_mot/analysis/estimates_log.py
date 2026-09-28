@@ -106,3 +106,45 @@ def r_trajectory(records: list[ScanEstimates], track_id: int) -> np.ndarray:
             if estimate.track_id == track_id:
                 r[k] = estimate.r
     return r
+
+
+@dataclass(frozen=True)
+class TrackLifetime:
+    """When a track was first and last reported, and whether it was deleted. [B2]
+
+    Attributes:
+        k_birth: first scan the track is reported.
+        k_last: last scan the track is reported.
+        deleted: True when the track is absent from the final record, i.e. a pruning
+            filter removed it (decision D13). A track still reported at the last scan is
+            not deleted, even if its r is below the threshold there.
+    """
+
+    k_birth: int
+    k_last: int
+    deleted: bool
+
+
+def track_lifetimes(records: list[ScanEstimates]) -> dict[int, TrackLifetime]:
+    """Every track's reported lifetime, read from the estimates log alone. [B2]
+
+    A pruning filter deletes in `predict`, so the posterior r that fell below the
+    threshold is still logged at k_last and the track is absent from k_last + 1 on. No
+    filter internals are needed to find a deletion.
+
+    Args:
+        records: the estimates log, one record per scan.
+
+    Returns:
+        TrackLifetime per track id, in order of first appearance.
+    """
+    first: dict[int, int] = {}
+    last: dict[int, int] = {}
+    for record in records:
+        for estimate in record.estimates:
+            first.setdefault(estimate.track_id, record.k)
+            last[estimate.track_id] = record.k
+    final_k = records[-1].k if records else None
+    return {track_id: TrackLifetime(k_birth=first[track_id], k_last=last[track_id],
+                                    deleted=last[track_id] != final_k)
+            for track_id in first}

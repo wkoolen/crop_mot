@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from crop_mot.config import MultiplicityConfig
 from crop_mot.sensor.fov import in_fov, sample_uniform_in_fov
 from crop_mot.sensor.sensor_model import SensorModel
 from crop_mot.types import Detection, Pose2D, Scan, ScanLabels
@@ -25,6 +26,8 @@ def sample_scan(
     model: SensorModel,
     rng_detect: np.random.Generator,
     rng_clutter: np.random.Generator,
+    multiplicity: MultiplicityConfig = MultiplicityConfig(),
+    rng_multi: np.random.Generator | None = None,
 ) -> tuple[Scan, ScanLabels]:
     """Draw one scan of detections from the truth.
 
@@ -38,7 +41,16 @@ def sample_scan(
          revised 2026-09-24). Consequence, deliberately NOT modelled by the filter's p_D:
          a plant within a few sigma of the FOV edge is effectively detected with
          probability p_D(x) * P(x + v in FOV) < p_D(x). Such a plant counts as visible
-         but not detected in the labels.
+         but not detected in the labels, and is listed in `truncated_ids`.
+      3b. MULTIPLICITY (extension slot, `sensor.multiplicity`). With kind "single" -
+         the default, and the A0 point-target assumption - steps 2-3 are the whole story:
+         at most one detection per plant. With "duplicate", a detected plant gets extra
+         hits z_primary + N(0, spread_std^2 I), each with probability p_split, up to
+         max_extra: a detector returning several boxes for one plant. With "poisson"
+         (extended objects), steps 2-3 are replaced: each visible plant produces
+         n ~ Poisson(gamma) detections z = h(x) + N(0, extent_std^2 I) + v, so it is
+         missed with probability exp(-gamma) and p_D is not used. Every z is truncated
+         to the FOV on its own; a plant counts as detected if at least one survives.
       4. Independently, draw n_clutter ~ Poisson(lambda_FA) false alarms, positioned
          uniformly over the FOV area.
       5. SORT all detections together by z (lexicographically) before returning, so that
@@ -51,7 +63,9 @@ def sample_scan(
     the detection coin flips - see `crop_mot.rng` for why that matters. For the same reason
     every visible plant always consumes one uniform (the coin flip) and one noise draw from
     rng_detect, detected or not: the detection stream's consumption then depends only on
-    the geometry, not on p_D.
+    the geometry, not on p_D. Everything the multiplicity models draw comes from a third
+    generator, rng_multi, so "single" output is identical whether or not it is passed,
+    and switching to "duplicate" leaves the primary detections and the clutter unchanged.
 
     Serves: [B1] the core of the simulator.
 
@@ -65,30 +79,52 @@ def sample_scan(
         model: the TRUTH sensor model (built from the scenario's `sensor` block).
         rng_detect: the "detection" substream, for detection coin flips and measurement noise.
         rng_clutter: the "clutter" substream, for the Poisson count and clutter positions.
+        multiplicity: the scenario's `sensor.multiplicity` block; default "single".
+        rng_multi: the "multiplicity" substream. Required unless multiplicity is "single".
 
     Returns:
         A tuple (scan, labels):
           * scan - what the filter receives, holding the REPORTED pose;
           * labels - the truth-side record of which detection came from which plant, which
-            plants were visible, and which were detected.
+            plants were visible, which were detected and which were lost at the FOV edge.
+
+    Raises:
+        ValueError: if multiplicity needs rng_multi and none is given, or its kind is
+            unknown.
     """
+    if multiplicity.kind not in ("single", "duplicate", "poisson"):
+        raise ValueError(f"unknown multiplicity kind {multiplicity.kind!r}")
+    if multiplicity.kind != "single" and rng_multi is None:
+        raise ValueError(f"multiplicity {multiplicity.kind!r} needs the rng_multi substream")
+
     R = model.measurement.R
     z_list = []
     origin_list = []
     visible_ids = []
     detected_ids = []
+    truncated_ids = []
 
     for plant_id, x in zip(truth.field.ids, truth.field.positions):
         if not in_fov(x, pose, model.fov):
             continue
         visible_ids.append(int(plant_id))
-        u = rng_detect.random()
-        v = rng_detect.multivariate_normal(np.zeros(R.shape[0]), R)
-        z = model.measurement.h(x, pose) + v
-        if u < model.p_D(x, pose) and in_fov(z, pose, model.fov):
+        if multiplicity.kind == "poisson":
+            generated = _poisson_hits(x, pose, model, multiplicity, rng_multi)
+        else:
+            u = rng_detect.random()
+            v = rng_detect.multivariate_normal(np.zeros(R.shape[0]), R)
+            z = model.measurement.h(x, pose) + v
+            generated = [z] if u < model.p_D(x, pose) else []
+            if generated and multiplicity.kind == "duplicate":
+                generated += _extra_hits(z, multiplicity, rng_multi)
+
+        kept = [z for z in generated if in_fov(z, pose, model.fov)]
+        if kept:
             detected_ids.append(int(plant_id))
-            z_list.append(z)
-            origin_list.append(int(plant_id))
+            z_list.extend(kept)
+            origin_list.extend([int(plant_id)] * len(kept))
+        elif generated:
+            truncated_ids.append(int(plant_id))
 
     n_clutter = rng_clutter.poisson(model.lambda_FA(pose))
     for z in sample_uniform_in_fov(pose, model.fov, n_clutter, rng_clutter):
@@ -108,5 +144,43 @@ def sample_scan(
         origin=tuple(origin_list[i] for i in order),
         visible_ids=tuple(visible_ids),
         detected_ids=tuple(detected_ids),
+        truncated_ids=tuple(truncated_ids),
     )
     return scan, labels
+
+
+def _extra_hits(
+    z_primary: np.ndarray, multiplicity: MultiplicityConfig, rng_multi: np.random.Generator
+) -> list[np.ndarray]:
+    """Duplicate hits on an already-detected plant. [B1, multiplicity "duplicate"]
+
+    The number of extras is geometric and capped: each further hit is added with
+    probability p_split while fewer than max_extra have been added, so the expected count
+    is p_split + p_split^2 + ... + p_split^max_extra. Each extra lies at
+    z_primary + N(0, spread_std^2 I), i.e. it inherits the primary's measurement noise
+    and adds its own offset, as a detector box that is split or doubled would.
+    """
+    n = 0
+    while n < multiplicity.max_extra and rng_multi.random() < multiplicity.p_split:
+        n += 1
+    offsets = rng_multi.normal(0.0, multiplicity.spread_std, size=(n, z_primary.shape[0]))
+    return [z_primary + offset for offset in offsets]
+
+
+def _poisson_hits(
+    x: np.ndarray, pose: Pose2D, model: SensorModel, multiplicity: MultiplicityConfig,
+    rng_multi: np.random.Generator,
+) -> list[np.ndarray]:
+    """Detections of one visible plant as an extended object. [B1, multiplicity "poisson"]
+
+    ASSUMPTION: the standard extended-object measurement model - the number of detections
+    is Poisson(gamma) and each one is an independent draw z = h(x) + w + v with
+    w ~ N(0, extent_std^2 I) (where on the plant) and v ~ N(0, R) (sensor noise). The sum
+    w + v is drawn as one Gaussian with covariance R + extent_std^2 I.
+    """
+    n = rng_multi.poisson(multiplicity.gamma)
+    R = model.measurement.R
+    cov = R + multiplicity.extent_std**2 * np.eye(R.shape[0])
+    noise = rng_multi.multivariate_normal(np.zeros(R.shape[0]), cov, size=n)
+    z_hat = model.measurement.h(x, pose)
+    return [z_hat + w for w in noise]

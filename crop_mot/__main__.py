@@ -11,7 +11,8 @@ functions without going through a CLI.
 Subcommands:
     simulate  --config configs/b1_two_rows.yaml          [B1]
     track     --config configs/b2_bernoulli_phantom.yaml [B2]
-    analyse   --run runs/<stamp>_...                     [B3]
+    analyse   --run runs/<stamp>_...                     [B1/B2/B3]
+    candidates --run runs/<stamp>_... --min-distance 1.0 [B2] phantom seeds for the bank
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from crop_mot.analysis.candidates import assumed_fov, format_candidates, phantom_candidates
 from crop_mot.runner.analyse import analyse_run
 from crop_mot.runner.run_dir import RunDir
 from crop_mot.runner.simulate import simulate_from_config
@@ -27,11 +29,11 @@ from crop_mot.runner.track import track_from_config
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Build the argument parser for all three subcommands.
+    """Build the argument parser for all subcommands.
 
     Returns:
-        A parser with `simulate`, `track` and `analyse` subcommands, each taking the
-        arguments its runner function needs.
+        A parser with `simulate`, `track`, `analyse` and `candidates` subcommands, each
+        taking the arguments its runner function needs.
     """
     parser = argparse.ArgumentParser(prog="python3 -m crop_mot",
                                      description="Crop-row MOT simulator and filters.")
@@ -53,6 +55,14 @@ def build_parser() -> argparse.ArgumentParser:
     analyse.add_argument("--run", type=Path, required=True, help="run folder to analyse")
     analyse.add_argument("--plots", nargs="+", default=None,
                          help="plots to render; default: the config's analysis.plots")
+
+    candidates = commands.add_parser(
+        "candidates", help="[B2] list clutter detections usable as phantom seeds")
+    candidates.add_argument("--run", type=Path, required=True, help="run folder to search")
+    candidates.add_argument("--min-distance", type=float, default=1.0,
+                            help="minimum distance to any plant in m (default: 1.0)")
+    candidates.add_argument("--min-separation", type=float, default=1.0,
+                            help="minimum distance between candidates in m (default: 1.0)")
     return parser
 
 
@@ -71,6 +81,11 @@ def main(argv: list[str] | None = None) -> int:
             run = simulate_from_config(args.config, args.runs)
         elif args.command == "track":
             run = track_from_config(args.config, args.runs, args.run)
+        elif args.command == "candidates":
+            run = RunDir(args.run)
+            print(format_candidates(phantom_candidates(
+                run, assumed_fov(run), args.min_distance, args.min_separation)))
+            return 0
         else:
             run = RunDir(args.run)
             analyse_run(run, plots=args.plots)

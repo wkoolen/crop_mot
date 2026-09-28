@@ -11,7 +11,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from crop_mot.analysis.estimates_log import ScanEstimates, write_estimates
-from crop_mot.config import RunConfig, load_run_config
+from crop_mot.config import PruneConfig, RunConfig, load_run_config
 from crop_mot.filters import FILTERS, build_filter
 from crop_mot.filters.base import TrackingFilter
 from crop_mot.runner.run_dir import RunDir, create_run_dir
@@ -19,7 +19,7 @@ from crop_mot.runner.simulate import simulate
 from crop_mot.sensor.record import read_detections
 
 
-def run_filter(flt: TrackingFilter, run: RunDir) -> None:
+def run_filter(flt: TrackingFilter, run: RunDir, log_name: str | None = None) -> None:
     """Run one filter over the recorded detections and write its estimates. [B2/B4]
 
     The loop, identical for every filter:
@@ -47,6 +47,8 @@ def run_filter(flt: TrackingFilter, run: RunDir) -> None:
         flt: any object satisfying TrackingFilter.
         run: the run folder holding detections.jsonl; estimates_<flt.name>.jsonl is written
             into the same folder.
+        log_name: the estimates log suffix, default flt.name. Added for the unpruned
+            companion run (decision D14), which is the same filter under another log name.
     """
     records = []
     state = flt.initial_state()
@@ -59,7 +61,7 @@ def run_filter(flt: TrackingFilter, run: RunDir) -> None:
         diagnostics = flt.diagnostics(state) if hasattr(flt, "diagnostics") else None
         records.append(ScanEstimates(k=scan.k, estimates=tuple(flt.extract(state)),
                                      diagnostics=diagnostics))
-    write_estimates(run.estimates(flt.name), records)
+    write_estimates(run.estimates(log_name or flt.name), records)
 
 
 def track_from_config(config_path: Path, runs_base: Path, run_dir: Path | None = None) -> RunDir:
@@ -83,6 +85,11 @@ def track_from_config(config_path: Path, runs_base: Path, run_dir: Path | None =
 
     A fresh run folder is named after the RUN config and holds a copy of it; the scenario
     is simulated with its own seed, i.e. exactly as `simulate` on that scenario would.
+
+    When the config prunes (filter.prune.r_min > 0), the same filter is also run with
+    pruning off into estimates_<kind>_unpruned.jsonl (decision D14), on the same
+    detections. That companion log is what the hypotheses figure draws after a deletion:
+    what r would have done had the track been kept.
     """
     cfg = load_run_config(config_path)
     if run_dir is None:
@@ -93,7 +100,15 @@ def track_from_config(config_path: Path, runs_base: Path, run_dir: Path | None =
         if not run.detections.is_file():
             raise FileNotFoundError(f"{run.detections} does not exist; simulate first")
     run_filter(build_filter(cfg.filter_cfg), run)
+    if cfg.filter_cfg.prune.r_min > 0.0:
+        unpruned = replace(cfg.filter_cfg, prune=PruneConfig())
+        run_filter(build_filter(unpruned), run, log_name=unpruned_log_name(cfg.filter_cfg.kind))
     return run
+
+
+def unpruned_log_name(filter_name: str) -> str:
+    """The estimates log suffix of a filter's unpruned companion run (decision D14)."""
+    return f"{filter_name}_unpruned"
 
 
 def track_all_filters(cfg: RunConfig, run: RunDir, filter_names: list[str]) -> None:

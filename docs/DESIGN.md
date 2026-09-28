@@ -184,6 +184,8 @@ Codebase/
 │
 ├── configs/
 │   ├── b1_two_rows.yaml              B1 scenario: two plant rows, lane path, detector params
+│   ├── b1_two_rows_duplicate.yaml    B1 variant: detector returns extra hits per plant (multiplicity)
+│   ├── b1_two_rows_extended.yaml     B1 variant: plants as extended objects, Poisson hits (multiplicity)
 │   └── b2_bernoulli_phantom.yaml     B2 run: reuses the B1 scenario, Bernoulli on a clutter-born track
 │
 ├── crop_mot/
@@ -228,11 +230,12 @@ Codebase/
 │   │
 │   ├── analysis/
 │   │   ├── estimates_log.py          read/write estimates_<filter>.jsonl
+│   │   ├── counts.py                 [B1] clairvoyant per-scan counts from labels.jsonl (eval only)
 │   │   ├── analytic.py               [B3] AnalyticReference Protocol + BernoulliExistenceReference (A2)
 │   │   ├── events.py                 [B3] build the ScanEvent sequence (carries per-scan p_D)
 │   │   ├── montecarlo.py             [B3] repeat a scenario over N seeds; mean r +/- band vs closed form
 │   │   ├── metrics.py                [B3] compare_r (max/rms error, first divergence); [B4] gospa stub
-│   │   └── plots.py                  scene, r_vs_k, r_vs_analytic, r_montecarlo; saves PNG, never shows
+│   │   └── plots.py                  scene, counts, r_vs_k, hypotheses(+gif), r_vs_analytic, r_montecarlo; saves, never shows
 │   │
 │   └── __main__.py                   `python -m crop_mot simulate|track|analyse` (argparse, thin)
 │
@@ -843,7 +846,7 @@ runs/2026-09-23T14-02-11_b2_bernoulli_phantom_seed42/
 | WP | Files | Interfaces / functions |
 |---|---|---|
 | **B1** simulator | `world/field.py`, `world/path.py`, `world/truth.py`, `sensor/fov.py`, `sensor/models.py`, `sensor/sensor_model.py`, `sensor/detector.py`, `sensor/record.py`, `runner/simulate.py`, `configs/b1_two_rows.yaml` | `Pose2D`, `FieldOfView`, `Detection`, `Scan`, `ScanLabels`, `MeasurementModel`/`LinearGaussianXY`, `SensorModel`, `sample_scan` |
-| **B2** Bernoulli | `filters/base.py`, `filters/kalman.py`, `filters/bernoulli.py`, `filters/birth.py`, `motion/models.py`, `runner/track.py`, `analysis/plots.py::plot_r_vs_k`, `configs/b2_bernoulli_phantom.yaml` | `TrackingFilter`, `BirthModel`, `SurvivalModel`, `MotionModel`/`StaticTarget`, `TrackEstimate` |
+| **B2** Bernoulli | `filters/base.py`, `filters/kalman.py`, `filters/bernoulli.py`, `filters/bernoulli_bank.py`, `filters/birth.py`, `motion/models.py`, `runner/track.py`, `analysis/plots.py::plot_r_vs_k`/`plot_hypotheses`, `analysis/candidates.py`, `configs/b2_bernoulli_phantom.yaml`, `configs/b2_bernoulli_bank_phantoms.yaml` | `TrackingFilter`, `BirthModel`, `SurvivalModel`, `MotionModel`/`StaticTarget`, `TrackEstimate` |
 | **B3** validation | `analysis/analytic.py`, `analysis/events.py`, `analysis/montecarlo.py`, `analysis/metrics.py`, `analysis/plots.py::{plot_r_vs_analytic,plot_r_montecarlo}`, `tests/test_b3_analytic_bernoulli.py` | `AnalyticReference`, `ScanEvent` (per-scan p_D), `BernoulliExistenceReference`, `compare_r`, `RComparison`, `run_monte_carlo`, `MonteCarloResult` |
 | **Extension slots** (stubbed, unused in B1–B4) | `world/path.py::generate_path` (pose_known), `sensor/sensor_model.py::RangeDependentPD`, `sensor/stereo.py` | `PoseSample`, `RangeDependentPD`, `StereoDepthModel` |
 | **B4** multi-target (phase 2) | new `filters/pda.py`, `jpda.py`, `gnn.py`, `pmb.py`, `pmbm.py`; existing `association/{gating,assignment,murty}.py`; one line in `filters/__init__.py::FILTERS` | same `TrackingFilter` Protocol, unchanged runner; `gospa` in `metrics.py`; optional `HasDiagnostics` |

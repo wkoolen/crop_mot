@@ -96,5 +96,6 @@ def read_labels(path: Path) -> list[ScanLabels]:
             origin=tuple(record["origin"]),
             visible_ids=tuple(record["visible_ids"]),
             detected_ids=tuple(record["detected_ids"]),
+            truncated_ids=tuple(record.get("truncated_ids", ())),
         ))
     return labels

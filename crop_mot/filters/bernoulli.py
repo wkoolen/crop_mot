@@ -285,7 +285,9 @@ def build_bernoulli(cfg: FilterConfig) -> BernoulliFilter:
         A ready-to-run BernoulliFilter with all models injected.
 
     Raises:
-        ValueError: if cfg.kind is not "bernoulli", or a referenced model kind is unknown.
+        ValueError: if cfg.kind is not "bernoulli", or a referenced model kind is unknown,
+            or pruning is configured (it lives in the bank filter; a single Bernoulli would
+            have nothing to report after deleting its one component).
     """
     if cfg.kind != "bernoulli":
         raise ValueError(f"build_bernoulli got filter kind {cfg.kind!r}")
@@ -293,6 +295,8 @@ def build_bernoulli(cfg: FilterConfig) -> BernoulliFilter:
         raise ValueError(f"unknown motion kind {cfg.motion.kind!r}; phase 1 has only 'static'")
     if cfg.birth.kind != "single_from_measurement":
         raise ValueError(f"unknown birth kind {cfg.birth.kind!r}")
+    if cfg.prune.r_min > 0.0:
+        raise ValueError("filter.prune is implemented by 'bernoulli_bank', not 'bernoulli'")
     if cfg.collapse not in COLLAPSE_STRATEGIES:
         raise ValueError(f"unknown collapse {cfg.collapse!r}; "
                          f"available: {sorted(COLLAPSE_STRATEGIES)}")

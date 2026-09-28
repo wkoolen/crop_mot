@@ -50,9 +50,13 @@ of the file tree rather than something you have to remember.
 ## Running it
 
 ```bash
-python3 -m crop_mot simulate --config configs/b1_two_rows.yaml           # B1
+python3 -m crop_mot simulate --config configs/b1_two_rows.yaml           # B1, prints scan counts
+python3 -m crop_mot analyse  --run runs/<stamp>_b1_two_rows_seed42       # B1: scene + counts plots
 python3 -m crop_mot track    --config configs/b2_bernoulli_phantom.yaml  # B2
 python3 -m crop_mot analyse  --run runs/<stamp>_b2_bernoulli_phantom_seed42
+python3 -m crop_mot candidates --run runs/<stamp>_b1_two_rows_seed42 --min-distance 1.0  # B2: phantom seeds
+python3 -m crop_mot track    --config configs/b2_bernoulli_bank_phantoms.yaml  # B2: several phantoms, pruned
+python3 -m crop_mot analyse  --run runs/<stamp>_b2_bernoulli_bank_phantoms_seed42 --plots hypotheses hypotheses_anim
 python3 -m pytest tests -q
 ```
 
@@ -68,7 +72,8 @@ runs/<timestamp>_<name>_seed<seed>/
   config.yaml                verbatim copy of the config used
   run_meta.json              seed, git sha, package versions, argv, timestamp
   truth.jsonl                plant positions + true and reported poses   (EVAL ONLY)
-  labels.jsonl               per-detection origin ids                    (EVAL ONLY)
+  labels.jsonl               per-detection origin ids, visible/detected/
+                             edge-lost plant ids per scan                (EVAL ONLY)
   detections.jsonl           the only filter input
   estimates_bernoulli.jsonl  one per filter
   metrics.json

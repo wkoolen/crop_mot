@@ -12,7 +12,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
-from crop_mot.config import DetectionConfig, ScenarioConfig
+from crop_mot.config import DetectionConfig, MultiplicityConfig, ScenarioConfig
 from crop_mot.runner.run_dir import RunDir
 from crop_mot.runner.simulate import simulate
 from crop_mot.sensor.fov import in_fov, sample_uniform_in_fov
@@ -247,3 +247,106 @@ def test_range_dependent_p_D_is_linear_between_its_endpoints() -> None:
     with pytest.raises(NotImplementedError):
         build_sensor_model(fov, replace(detection, occlusion_factor=0.6), 2.0,
                            LinearGaussianXY(R=0.04 * np.eye(2)))
+
+
+# --------------------------------------------------------------------------------------
+# Multiplicity: more than one detection per plant per scan (decision D10)
+# --------------------------------------------------------------------------------------
+
+DUPLICATE = MultiplicityConfig(kind="duplicate", p_split=0.3, max_extra=3, spread_std=0.1)
+POISSON = MultiplicityConfig(kind="poisson", gamma=3.0, extent_std=0.08)
+
+
+def _with_multiplicity(cfg: ScenarioConfig, multiplicity: MultiplicityConfig) -> ScenarioConfig:
+    return replace(cfg, sensor=replace(cfg.sensor, multiplicity=multiplicity))
+
+
+def test_duplicate_with_zero_split_is_byte_identical_to_single(
+    tiny_scenario: ScenarioConfig, tmp_path
+) -> None:
+    """Extra hits draw from their own substream, so none of them perturbs the rest. [B1, D10]
+
+    With p_split = 0 the duplicate model adds nothing, so if its draws came from the
+    detection or clutter streams the output would still shift. Byte equality proves they
+    do not - and hence that the default "single" reproduces pre-multiplicity runs.
+    """
+    walk_past = replace(tiny_scenario, path=replace(tiny_scenario.path, n_scans=60))
+    single = _simulate_into(walk_past, tmp_path / "single")
+    no_split = _simulate_into(_with_multiplicity(walk_past, replace(DUPLICATE, p_split=0.0)),
+                              tmp_path / "no_split")
+    assert single.detections.read_bytes() == no_split.detections.read_bytes()
+    assert single.labels.read_bytes() == no_split.labels.read_bytes()
+
+
+def test_duplicate_keeps_the_primary_detections_and_the_clutter(
+    tiny_scenario: ScenarioConfig, tmp_path
+) -> None:
+    """Switching to "duplicate" only adds hits near detected plants. [B1, D10]
+
+    The p_D coin flips and the clutter are unchanged scan by scan, so a comparison between
+    "single" and "duplicate" isolates the effect of the extra hits.
+    """
+    cfg = _standing_still(tiny_scenario, n_scans=100)
+    single = read_labels(_simulate_into(cfg, tmp_path / "single").labels)
+    dup = read_labels(_simulate_into(_with_multiplicity(cfg, DUPLICATE), tmp_path / "dup").labels)
+
+    assert [lab.detected_ids for lab in single] == [lab.detected_ids for lab in dup]
+    assert [lab.origin.count(None) for lab in single] == [lab.origin.count(None) for lab in dup]
+    assert sum(len(lab.origin) for lab in dup) > sum(len(lab.origin) for lab in single)
+
+
+def test_duplicate_extra_hit_count_matches_the_capped_geometric(
+    tiny_scenario: ScenarioConfig, tmp_path
+) -> None:
+    """Extra hits per detected plant have the configured capped-geometric mean. [B1, D10]
+
+    P(n = j) = p^j (1 - p) for j < max_extra and p^max_extra at the cap. Parked so the
+    plants sit well inside the FOV, where FOV truncation of a hit is negligible.
+    """
+    cfg = _with_multiplicity(_standing_still(tiny_scenario, n_scans=400), DUPLICATE)
+    labels = read_labels(_simulate_into(cfg, tmp_path / "run").labels)
+    n_detected = sum(len(lab.detected_ids) for lab in labels)
+    n_extra = sum(len(lab.origin) - lab.origin.count(None) for lab in labels) - n_detected
+    assert n_detected >= 1000
+
+    p, cap = DUPLICATE.p_split, DUPLICATE.max_extra
+    j = np.arange(cap + 1)
+    pmf = np.where(j < cap, p**j * (1.0 - p), p**cap)
+    mean = float(np.sum(j * pmf))
+    var = float(np.sum(j**2 * pmf)) - mean**2
+    assert abs(n_extra / n_detected - mean) < 4.0 * np.sqrt(var / n_detected)
+
+
+def test_poisson_hits_per_plant_have_mean_gamma(tiny_scenario: ScenarioConfig, tmp_path) -> None:
+    """Under "poisson" each visible plant gives Poisson(gamma) hits. [B1, D10]
+
+    Checks the mean per visible plant-scan, and that a plant is missed entirely with
+    probability exp(-gamma) - the effective p_D of the extended-object model.
+    """
+    cfg = _with_multiplicity(_standing_still(tiny_scenario, n_scans=400), POISSON)
+    labels = read_labels(_simulate_into(cfg, tmp_path / "run").labels)
+    n_visible = sum(len(lab.visible_ids) for lab in labels)
+    n_hits = sum(len(lab.origin) - lab.origin.count(None) for lab in labels)
+    n_missed = n_visible - sum(len(lab.detected_ids) for lab in labels)
+    assert n_visible >= 1000
+
+    gamma = POISSON.gamma
+    assert abs(n_hits / n_visible - gamma) < 4.0 * np.sqrt(gamma / n_visible)
+    p_miss = np.exp(-gamma)
+    assert abs(n_missed / n_visible - p_miss) < 4.0 * np.sqrt(p_miss * (1 - p_miss) / n_visible)
+
+
+@pytest.mark.parametrize("multiplicity", [DUPLICATE, POISSON], ids=["duplicate", "poisson"])
+def test_multiplicity_detections_stay_inside_the_fov(
+    tiny_scenario: ScenarioConfig, tmp_path, multiplicity: MultiplicityConfig
+) -> None:
+    """Every extra hit is truncated to the FOV like a primary one (D4). [B1, D10]"""
+    cfg = _with_multiplicity(replace(tiny_scenario, path=replace(tiny_scenario.path,
+                                                                 n_scans=60)), multiplicity)
+    run = _simulate_into(cfg, tmp_path / "run")
+    truth = read_truth(run.truth)
+    for scan, label, sample in zip(read_detections(run.detections), read_labels(run.labels),
+                                   truth.poses):
+        assert all(in_fov(d.z, sample.true, cfg.sensor.fov) for d in scan.detections)
+        assert len(set(label.detected_ids)) == len(label.detected_ids)
+        assert set(o for o in label.origin if o is not None) == set(label.detected_ids)

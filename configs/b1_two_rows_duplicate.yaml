@@ -1,10 +1,12 @@
-# B1 scenario: two plant rows with the robot walking the lane between them.
+# B1 scenario: b1_two_rows with a detector that sometimes returns several hits per plant.
+# Identical to b1_two_rows.yaml except for name and sensor.multiplicity; for the same seed
+# the plants, the primary detections and the clutter are the same as there.
 #
 # This file plus its seed defines the world completely. Every filter in B2/B4 runs on the
 # detections this scenario produces, so changing anything here invalidates a comparison -
 # make a new file instead of editing this one.
 
-name: b1_two_rows
+name: b1_two_rows_duplicate
 seed: 42
 
 world:
@@ -60,7 +62,10 @@ sensor:
   #   poisson:   extended objects, Poisson(gamma) hits per visible plant
   #              (gamma, extent_std; detection.p_D is then unused)
   multiplicity:
-    kind: single
+    kind: duplicate
+    p_split: 0.3           # each further extra hit with this probability ...
+    max_extra: 3           # ... up to this many; mean extras 0.3 + 0.09 + 0.027 = 0.417
+    spread_std: 0.10       # m, offset of an extra hit from the primary detection
 
   measurement:
     kind: linear_xy

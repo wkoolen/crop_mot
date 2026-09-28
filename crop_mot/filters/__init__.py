@@ -19,9 +19,11 @@ from collections.abc import Callable
 from crop_mot.config import FilterConfig
 from crop_mot.filters.base import TrackingFilter
 from crop_mot.filters.bernoulli import build_bernoulli
+from crop_mot.filters.bernoulli_bank import build_bernoulli_bank
 
 FILTERS: dict[str, Callable[[FilterConfig], TrackingFilter]] = {
     "bernoulli": build_bernoulli,
+    "bernoulli_bank": build_bernoulli_bank,   # B2: independent Bernoullis + pruning (D12)
     # Phase 2 (B4) - one line each, in roughly increasing order of difficulty:
     #   "gnn":   build_gnn,    # baseline: hard assignment via linear_sum_assignment
     #   "pda":   build_pda,    # many measurements, one target

@@ -121,17 +121,23 @@ class ScanLabels:
     Attributes:
         k: scan index, matching the corresponding `Scan`.
         origin: one entry per detection in the same order as `Scan.detections`; the object
-            id the detection came from, or None if it is clutter.
+            id the detection came from, or None if it is clutter. An id may appear more
+            than once when the scenario's multiplicity is not "single".
         visible_ids: object ids that were inside the FOV this scan (whether detected or not).
-        detected_ids: object ids that were actually detected this scan. The difference
-            between visible_ids and detected_ids is exactly the misdetection event that
-            drives r downward in B2.
+        detected_ids: object ids that were actually detected this scan, each listed once.
+            The difference between visible_ids and detected_ids is exactly the misdetection
+            event that drives r downward in B2.
+        truncated_ids: visible object ids whose detection was generated but lost because
+            every z it produced fell outside the FOV (decision D4). Lets the evaluation
+            tell this edge loss apart from an ordinary p_D miss; both are in
+            visible_ids - detected_ids. Defaults to empty so older labels.jsonl files load.
     """
 
     k: int
     origin: tuple[int | None, ...]
     visible_ids: tuple[int, ...]
     detected_ids: tuple[int, ...]
+    truncated_ids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)

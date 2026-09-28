@@ -10,6 +10,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from crop_mot.analysis.counts import format_summary, scan_counts
 from crop_mot.config import ScenarioConfig, load_scenario_config
 from crop_mot.rng import substreams
 from crop_mot.runner.run_dir import RunDir, create_run_dir, write_run_meta
@@ -32,6 +33,8 @@ def simulate(cfg: ScenarioConfig, run: RunDir) -> None:
       3. For each scan, sample detections from the TRUE pose, producing both the Scan the
          filter will see and the ScanLabels it must not.
       4. Write truth.jsonl, labels.jsonl and detections.jsonl, then run_meta.json.
+      5. Print the clairvoyant per-scan counts summary (`crop_mot.analysis.counts`) to
+         stdout. Nothing extra is written: the counts are derived from labels.jsonl.
 
     Writes detections.jsonl LAST of the three data files, so that its presence is a
     reliable signal that the simulation completed - a half-written detections file consumed
@@ -57,7 +60,8 @@ def simulate(cfg: ScenarioConfig, run: RunDir) -> None:
     labels = []
     for k, sample in enumerate(poses):
         scan, label = sample_scan(truth, sample.true, k, sample.t, model,
-                                  streams["detection"], streams["clutter"])
+                                  streams["detection"], streams["clutter"],
+                                  cfg.sensor.multiplicity, streams["multiplicity"])
         scans.append(scan)
         labels.append(label)
 
@@ -65,6 +69,7 @@ def simulate(cfg: ScenarioConfig, run: RunDir) -> None:
     write_labels(run.labels, labels)
     write_detections(run.detections, scans)
     write_run_meta(run, cfg.seed, sys.argv)
+    print(format_summary(scan_counts(labels)))
 
 
 def simulate_from_config(config_path: Path, runs_base: Path) -> RunDir:

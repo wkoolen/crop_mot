@@ -135,6 +135,42 @@ class MeasurementConfig:
 
 
 @dataclass(frozen=True)
+class MultiplicityConfig:
+    """How many detections one plant can produce in one scan. [B1, extension slot]
+
+    `kind` selects the generative model in `crop_mot.sensor.detector.sample_scan`:
+      * "single"    -> at most one detection per plant per scan: the A0 point-target
+                       model every phase-1 filter and the A2 closed form assume. Default.
+      * "duplicate" -> a detector artefact: after the ordinary p_D detection, extra hits
+                       are added near it, each with probability p_split, up to max_extra,
+                       at z_primary + N(0, spread_std^2 I).
+      * "poisson"   -> the extended-object (EOT) model: each visible plant produces
+                       Poisson(gamma) detections at x + N(0, extent_std^2 I) + v. The
+                       detection probability becomes 1 - exp(-gamma); detection.p_D is
+                       not used.
+
+    TRUTH ONLY. The filter's assumed sensor has no multiplicity, so any kind other than
+    "single" is a model-mismatch experiment for the Bernoulli filter. An EOT filter would
+    add an assumed counterpart.
+
+    Attributes:
+        kind: "single", "duplicate" or "poisson".
+        p_split: "duplicate" only; probability of each further extra hit, in [0, 1).
+        max_extra: "duplicate" only; cap on extra hits per detected plant.
+        spread_std: "duplicate" only; metres, spread of an extra hit around the primary z.
+        gamma: "poisson" only; expected detections per visible plant per scan.
+        extent_std: "poisson" only; metres, isotropic extent of the plant.
+    """
+
+    kind: str = "single"
+    p_split: float | None = None
+    max_extra: int = 3
+    spread_std: float | None = None
+    gamma: float | None = None
+    extent_std: float | None = None
+
+
+@dataclass(frozen=True)
 class SensorConfig:
     """The TRUTH detector used by the simulator. [B1]
 
@@ -147,12 +183,14 @@ class SensorConfig:
         detection: p_D profile and parameters.
         lambda_FA: expected number of clutter detections per scan (Poisson mean).
         measurement: measurement model and noise.
+        multiplicity: detections per plant per scan. Optional in the YAML, default "single".
     """
 
     fov: FieldOfView
     detection: DetectionConfig
     lambda_FA: float
     measurement: MeasurementConfig
+    multiplicity: MultiplicityConfig = MultiplicityConfig()
 
 
 @dataclass(frozen=True)
@@ -219,15 +257,21 @@ class BirthConfig:
     Attributes:
         kind: "single_from_measurement" seeds one Bernoulli component from a chosen
             detection at a chosen scan. For the B2 phantom experiment that detection is a
-            clutter return, so r should then decay.
-        at_scan: scan index at which to seed. Only used by "single_from_measurement".
+            clutter return, so r should then decay. "from_measurements" seeds one
+            component per entry of `seeds`, for the `bernoulli_bank` filter (decision D12).
+        at_scan: scan index at which to seed. For "from_measurements", the first seed's.
         detection_index: which detection of scan `at_scan` to seed from. Chosen by the
             config author (by inspecting labels.jsonl), so the birth model stays truth-blind.
+            For "from_measurements", the first seed's.
         r_b: birth existence probability r_b assigned to the new component. PHASE-1
             STAND-IN: a configured constant in place of the measurement-driven
             r_b = e / (e + lambda_FA c(z)), e = integral lambda_u(x) p_D(x) g(z|x) dx,
             derived in [A2 §4].
         init_cov: initial covariance for the new component, shape (dim_x, dim_x).
+        seeds: (at_scan, detection_index) pairs, one per component, for
+            "from_measurements"; the pair's position in the list is the track id. Empty for
+            "single_from_measurement". Chosen by the config author, e.g. with
+            `python3 -m crop_mot candidates`.
     """
 
     kind: str
@@ -235,6 +279,7 @@ class BirthConfig:
     detection_index: int
     r_b: float
     init_cov: np.ndarray
+    seeds: tuple[tuple[int, int], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -262,6 +307,23 @@ class GateConfig:
 
 
 @dataclass(frozen=True)
+class PruneConfig:
+    """Deleting a component whose existence probability has become negligible. [B2]
+
+    A2 §5's deletion: a phantom that is looked at and missed scan after scan ratchets r
+    down until it falls below a threshold and is removed. Part of the filter state, unlike
+    the reporting threshold in `extract` (decision D7), which never alters r.
+
+    Attributes:
+        r_min: a component whose predicted r is below r_min is deleted (decision D13).
+            0.0, the default, never deletes - which keeps every existing run and the B3
+            comparison unchanged.
+    """
+
+    r_min: float = 0.0
+
+
+@dataclass(frozen=True)
 class FilterConfig:
     """Everything needed to build one filter. [B2/B4]
 
@@ -280,6 +342,7 @@ class FilterConfig:
         collapse: how the post-update mixture of branch densities is collapsed back to one
             Gaussian; a key into `crop_mot.filters.collapse.COLLAPSE_STRATEGIES`. Optional in
             the YAML, default "best_branch".
+        prune: component deletion. Optional in the YAML, default off (r_min = 0).
     """
 
     kind: str
@@ -290,6 +353,7 @@ class FilterConfig:
     survival: SurvivalConfig
     gate: GateConfig
     collapse: str = "best_branch"
+    prune: PruneConfig = PruneConfig()
 
 
 # --------------------------------------------------------------------------------------
@@ -550,13 +614,52 @@ def _parse_path(raw: Any, where: str) -> PathConfig:
     )
 
 
+def _parse_multiplicity(raw: Any, where: str) -> MultiplicityConfig:
+    if not isinstance(raw, dict) or "kind" not in raw:
+        raise ValueError(f"{where}: expected a mapping with a 'kind' key")
+    kind = raw["kind"]
+    if kind == "single":
+        _check_keys(raw, where, required={"kind"})
+        return MultiplicityConfig()
+    if kind == "duplicate":
+        _check_keys(raw, where, required={"kind", "p_split", "spread_std"},
+                    optional={"max_extra"})
+        p_split = _as_float(raw["p_split"], f"{where}.p_split")
+        max_extra = _as_int(raw.get("max_extra", 3), f"{where}.max_extra")
+        spread_std = _as_float(raw["spread_std"], f"{where}.spread_std")
+        if not 0.0 <= p_split < 1.0 or max_extra < 0 or spread_std < 0.0:
+            raise ValueError(f"{where}: need 0 <= p_split < 1, max_extra >= 0, spread_std >= 0")
+        return MultiplicityConfig(kind=kind, p_split=p_split, max_extra=max_extra,
+                                  spread_std=spread_std)
+    if kind == "poisson":
+        _check_keys(raw, where, required={"kind", "gamma", "extent_std"})
+        gamma = _as_float(raw["gamma"], f"{where}.gamma")
+        extent_std = _as_float(raw["extent_std"], f"{where}.extent_std")
+        if gamma < 0.0 or extent_std < 0.0:
+            raise ValueError(f"{where}: need gamma >= 0 and extent_std >= 0")
+        return MultiplicityConfig(kind=kind, gamma=gamma, extent_std=extent_std)
+    raise ValueError(
+        f"{where}.kind: unknown kind {kind!r}; use 'single', 'duplicate' or 'poisson'"
+    )
+
+
 def _parse_sensor(raw: Any, where: str) -> SensorConfig:
-    _check_keys(raw, where, required={"fov", "detection", "lambda_FA", "measurement"})
+    _check_keys(raw, where, required={"fov", "detection", "lambda_FA", "measurement"},
+                optional={"multiplicity"})
+    detection = _parse_detection(raw["detection"], f"{where}.detection")
+    multiplicity = (_parse_multiplicity(raw["multiplicity"], f"{where}.multiplicity")
+                    if "multiplicity" in raw else MultiplicityConfig())
+    if multiplicity.kind == "poisson" and detection.kind != "constant":
+        raise ValueError(
+            f"{where}: multiplicity.kind 'poisson' sets the detection probability through "
+            f"gamma, so detection.kind must be 'constant' (its p_D is then unused)"
+        )
     return SensorConfig(
         fov=_parse_fov(raw["fov"], f"{where}.fov"),
-        detection=_parse_detection(raw["detection"], f"{where}.detection"),
+        detection=detection,
         lambda_FA=_as_float(raw["lambda_FA"], f"{where}.lambda_FA"),
         measurement=_parse_measurement(raw["measurement"], f"{where}.measurement"),
+        multiplicity=multiplicity,
     )
 
 
@@ -575,7 +678,7 @@ def _parse_filter(raw: Any, where: str) -> FilterConfig:
     _check_keys(raw, where,
                 required={"kind", "motion", "measurement", "assumed_sensor", "birth",
                           "survival", "gate"},
-                optional={"collapse"})
+                optional={"collapse", "prune"})
 
     motion = raw["motion"]
     _check_keys(motion, f"{where}.motion", required={"kind"}, optional={"q"})
@@ -585,8 +688,22 @@ def _parse_filter(raw: Any, where: str) -> FilterConfig:
                 required={"fov", "detection", "lambda_FA"})
 
     birth = raw["birth"]
-    _check_keys(birth, f"{where}.birth",
-                required={"kind", "at_scan", "detection_index", "r_b", "init_cov"})
+    if isinstance(birth, dict) and birth.get("kind") == "from_measurements":
+        _check_keys(birth, f"{where}.birth", required={"kind", "seeds", "r_b", "init_cov"})
+        seeds = _parse_seeds(birth["seeds"], f"{where}.birth.seeds")
+        at_scan, detection_index = seeds[0]
+    else:
+        _check_keys(birth, f"{where}.birth",
+                    required={"kind", "at_scan", "detection_index", "r_b", "init_cov"})
+        seeds = ()
+        at_scan = _as_int(birth["at_scan"], f"{where}.birth.at_scan")
+        detection_index = _as_int(birth["detection_index"], f"{where}.birth.detection_index")
+
+    prune = raw.get("prune", {})
+    _check_keys(prune, f"{where}.prune", required=set(), optional={"r_min"})
+    r_min = _as_float(prune.get("r_min", 0.0), f"{where}.prune.r_min")
+    if not 0.0 <= r_min < 1.0:
+        raise ValueError(f"{where}.prune.r_min: expected 0 <= r_min < 1, got {r_min}")
 
     survival = raw["survival"]
     _check_keys(survival, f"{where}.survival", required=set(), optional={"p_S"})
@@ -607,18 +724,32 @@ def _parse_filter(raw: Any, where: str) -> FilterConfig:
         ),
         birth=BirthConfig(
             kind=_as_str(birth["kind"], f"{where}.birth.kind"),
-            at_scan=_as_int(birth["at_scan"], f"{where}.birth.at_scan"),
-            detection_index=_as_int(birth["detection_index"],
-                                    f"{where}.birth.detection_index"),
+            at_scan=at_scan,
+            detection_index=detection_index,
             r_b=_as_float(birth["r_b"], f"{where}.birth.r_b"),
             init_cov=_as_matrix(birth["init_cov"], f"{where}.birth.init_cov"),
+            seeds=seeds,
         ),
         survival=SurvivalConfig(p_S=_as_float(survival.get("p_S", 1.0),
                                               f"{where}.survival.p_S")),
         gate=GateConfig(chi2_prob=_as_float(gate.get("chi2_prob", 0.99),
                                             f"{where}.gate.chi2_prob")),
         collapse=_as_str(raw.get("collapse", "best_branch"), f"{where}.collapse"),
+        prune=PruneConfig(r_min=r_min),
     )
+
+
+def _parse_seeds(raw: Any, where: str) -> tuple[tuple[int, int], ...]:
+    """A non-empty list of {at_scan, detection_index} mappings, as (int, int) pairs."""
+    if not isinstance(raw, list) or not raw:
+        raise ValueError(f"{where}: expected a non-empty list of "
+                         "{at_scan, detection_index} mappings")
+    seeds = []
+    for i, seed in enumerate(raw):
+        _check_keys(seed, f"{where}[{i}]", required={"at_scan", "detection_index"})
+        seeds.append((_as_int(seed["at_scan"], f"{where}[{i}].at_scan"),
+                      _as_int(seed["detection_index"], f"{where}[{i}].detection_index")))
+    return tuple(seeds)
 
 
 def _parse_analysis(raw: Any, where: str) -> AnalysisConfig:
