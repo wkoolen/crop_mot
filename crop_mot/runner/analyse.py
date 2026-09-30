@@ -88,9 +88,10 @@ def analyse_run(run: RunDir, plots: Sequence[str] | None = None,
         plots: plot names to render, overriding the config's `analysis.plots`; None means
             use the config's list. Lets the B2 r_vs_k plot be produced through the CLI on
             its own.
-        scene_k: the scan the `scene` plot shows. None means the first scan any track is
-            reported, or 0 if there is none - read from the log, so it works for any birth
-            model.
+        scene_k: the scan the `scene` plot shows, and the `tracks` and `existence_map`
+            plots too. None means, for `scene`, the first scan any track is reported (or 0)
+            - read from the log, so it works for any birth model - and for the other two
+            the last scan, the final map.
 
     Raises:
         ValueError: if a plot name is unknown or needs a filter run the folder does not
@@ -146,6 +147,8 @@ def analyse_run(run: RunDir, plots: Sequence[str] | None = None,
             _monte_carlo(run, cfg, out)
         elif name == "phantom_fates":
             _phantom_fates(run, cfg, out)
+        elif name in ("tracks", "existence_map") and scene_k is not None:
+            ANY_FILTER_PLOTS[name](run, filter_name, out, k=scene_k)
         else:
             ANY_FILTER_PLOTS[name](run, filter_name, out)
 

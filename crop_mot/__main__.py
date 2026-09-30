@@ -60,8 +60,9 @@ def build_parser() -> argparse.ArgumentParser:
     analyse.add_argument("--plots", nargs="+", default=None,
                          help="plots to render; default: the config's analysis.plots")
     analyse.add_argument("--scene-k", type=int, default=None,
-                         help="scan the scene plot shows; default: the first scan a track "
-                              "is reported, or 0")
+                         help="scan the scene, tracks and existence_map plots show; default: "
+                              "the first scan a track is reported (scene), the last scan "
+                              "(tracks, existence_map)")
 
     candidates = commands.add_parser(
         "candidates", help="[B2] list clutter detections usable as phantom seeds")
