@@ -63,6 +63,7 @@ python3 -m crop_mot simulate --config configs/b1_two_rows_weeds.yaml     # B1 wi
 python3 -m crop_mot track    --config configs/b2_bernoulli_bank_weeds.yaml  # B2: the same phantoms, in the field with weeds
 python3 -m crop_mot analyse  --run runs/<stamp>_b2_bernoulli_bank_weeds_seed42 --plots tracks existence_map cardinality gospa nees lifetimes  # figures for any filter
 python3 -m crop_mot analyse  --run runs/<stamp>_b2_phantom_fates_seed42 --plots phantom_fates  # the phantom's fate over 200 seeds
+python3 -m crop_mot compare  --run runs/<stamp>_b2_bernoulli_phantom_seed42 --filters bernoulli bernoulli_bank  # figures side by side
 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 python3 -m crop_mot scaling --config configs/b2_bernoulli_bank_weeds.yaml --sweep lambda_FA --values 1 2 4 8 16 --seeds 3
 python3 -m pytest tests -q
 ```

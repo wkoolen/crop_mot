@@ -14,6 +14,7 @@ Subcommands:
     analyse   --run runs/<stamp>_...                     [B1/B2/B3]
     candidates --run runs/<stamp>_... --min-distance 1.0 [B2] phantom seeds for the bank
     scaling   --config ... --sweep lambda_FA --values 1 2 4 8  [B4] time per scan
+    compare   --run runs/<stamp>_... --filters bernoulli bernoulli_bank  [B4] side by side
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from pathlib import Path
 
 from crop_mot.analysis.candidates import assumed_fov, format_candidates, phantom_candidates
 from crop_mot.runner.analyse import analyse_run
+from crop_mot.runner.compare import compare_run
 from crop_mot.runner.run_dir import RunDir
 from crop_mot.runner.scaling import scaling_from_config
 from crop_mot.runner.simulate import simulate_from_config
@@ -68,6 +70,14 @@ def build_parser() -> argparse.ArgumentParser:
                             help="minimum distance to any plant in m (default: 1.0)")
     candidates.add_argument("--min-separation", type=float, default=1.0,
                             help="minimum distance between candidates in m (default: 1.0)")
+    compare = commands.add_parser(
+        "compare", help="[B4] several filters on one run folder, figures side by side")
+    compare.add_argument("--run", type=Path, required=True, help="run folder to compare on")
+    compare.add_argument("--filters", nargs="+", required=True,
+                         help="filter kinds to run, from crop_mot.filters.FILTERS")
+    compare.add_argument("--plots", nargs="+", default=None,
+                         help="figures to compare; default: every figure for any filter")
+
     scaling = commands.add_parser(
         "scaling", help="[B4] update time per scan against problem size (roadmap 4c)")
     scaling.add_argument("--config", type=Path, required=True, help="run YAML to sweep")
@@ -97,6 +107,9 @@ def main(argv: list[str] | None = None) -> int:
             run = simulate_from_config(args.config, args.runs)
         elif args.command == "track":
             run = track_from_config(args.config, args.runs, args.run)
+        elif args.command == "compare":
+            run = RunDir(args.run)
+            compare_run(run, args.filters, args.plots)
         elif args.command == "scaling":
             run = scaling_from_config(args.config, args.sweep, args.values, args.seeds,
                                       args.runs)
