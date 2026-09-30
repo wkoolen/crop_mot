@@ -55,7 +55,6 @@ The B3 → B4 roadmap's open questions are in `docs/ROADMAP.md` §7. From the B1
 - **The Monte-Carlo half of B3**: reworked into the per-seed cross-check (D17, roadmap
   step 4). The detection branch and the birth marker are settled (D25); pruned tracks are
   checked on the unpruned log (D14).
-- **`docs/derivations/README.md`**: the A2 section-to-function rows (TODO(human)).
 
 ---
 

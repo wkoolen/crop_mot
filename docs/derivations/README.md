@@ -54,11 +54,9 @@ places to re-read when a section changes.
 
 | Derivation section | Implemented in | Note |
 |---|---|---|
-| A1 §Kalman update | `filters/kalman.py::kf_update` | Joseph form, see the docstring |
-| A0 §clutter intensity | `sensor/models.py` (clutter) | `lambda_FA * c(z)`, uniform over FOV area |
-
-<!-- TODO(human): add the A2 rows. Which section of A2 backs which function of
-     filters/bernoulli.py and analysis/analytic.py — in particular: the misdetection
-     update, the detection update, birth from a measurement, and the marginal r that
-     `extract` reports. Two to five rows is plenty; this is the map the B3 re-read
-     depends on. -->
+| A0 §Measurement model | `sensor/sensor_model.py::clutter_density`, `sensor/detector.py::sample_scan` | clutter intensity `lambda_FA * c(z)`, `c(z)` uniform over the FOV area (D5) |
+| A1 §Result (Kalman filter update) | `filters/kalman.py::kf_update` | Joseph form, see the docstring |
+| A2 §2 Misdetection update | `filters/bernoulli.py::BernoulliFilter._update_existing` (no gated detection); `analysis/analytic.py::BernoulliExistenceReference.r_sequence` (miss case) | `r+ = r(1 - p_D) / (1 - r p_D)`; `p_D` at the predicted mean stands in for `p_D_bar` [A2 §2.1] |
+| A2 §3.1 What r+ = 1 is | `BernoulliFilter._update_existing` (gated detections); `BernoulliFilter.extract`; `r_sequence` (detection cases) | the detected and missed rows averaged into `r_marg`, which `extract` reports. Two or more detections combine it with A0 §Measurement model (D2), not yet its own section. The density is collapsed by `filters/collapse.py::KeepBestBranch` instead of kept as the mixture (D1) |
+| A2 §4 Birth from a measurement | `filters/birth.py::SingleFromMeasurement`; `BernoulliFilter.update` (after the update, D3); `r_sequence` (birth step) | `r_b` is a configured constant standing in for `e / (e + lambda_FA(z))` |
+| A2 §5 Cromwell's rule | `filters/bernoulli_bank.py::BernoulliBankFilter.predict` | pruning below `r_min` (D13); `r_sequence` has no deletion, so B3 reads the unpruned log (D14) |

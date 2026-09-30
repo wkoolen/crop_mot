@@ -7,18 +7,20 @@ Estimation and filtering are the contribution. Vision is deliberately stubbed as
 black-box detector with three knobs: detection probability `p_D`, clutter rate
 `lambda_FA`, and Gaussian measurement noise `R`.
 
-> **This repository is a skeleton.** Every function body is `raise NotImplementedError`
-> with a docstring stating what it must do, its inputs and outputs, and which work package
-> it serves. No filter, simulator or mathematics is implemented yet.
+Docstrings are the specification: each states what the function does, its inputs and
+outputs, the work package it serves, and the derivation it implements (`[A2 §3.1]`, see
+[docs/derivations/](docs/derivations/README.md)). Modelling and interface decisions are in
+[docs/DECISIONS.md](docs/DECISIONS.md); the plan from B3 to B4, with its progress table,
+is [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Work packages
 
 | WP | What | Status |
 |---|---|---|
-| **B1** | Simulator: static plants in rows, known robot path, detector that misses with probability `1 - p_D` and adds Poisson clutter | skeleton |
-| **B2** | Bernoulli filter over B1's output; existence probability `r` per scan, plus the r-decay plot for a phantom (clutter-born) track | skeleton |
-| **B3** | Validation: compare the simulated `r` against the hand-derived closed form (thesis item A2), plus a Monte-Carlo check | skeleton |
-| **B4** | PDA, JPDA, PMB, PMBM, and a GNN baseline — phase 2 | interfaces only |
+| **B1** | Simulator: static plants in rows, known robot path, detector that misses with probability `1 - p_D` and adds Poisson clutter | done; also weeds (persistent false targets) and detection multiplicity |
+| **B2** | Bernoulli filter over B1's output; existence probability `r` per scan, plus the r-decay plot for a phantom (clutter-born) track | done; also a bank of independent Bernoulli tracks with pruning |
+| **B3** | Validation: compare the simulated `r` against the hand-derived closed form (thesis item A2), plus a Monte-Carlo check | single-run cross-check done: every track matches A2 to about 1e-15. The Monte-Carlo half is roadmap step 4 |
+| **B4** | PDA, JPDA, PMB, PMBM, and a GNN baseline — phase 2 | interfaces only; built step by step per the roadmap |
 
 ## The pipeline
 
@@ -53,19 +55,24 @@ of the file tree rather than something you have to remember.
 python3 -m crop_mot simulate --config configs/b1_two_rows.yaml           # B1, prints scan counts
 python3 -m crop_mot analyse  --run runs/<stamp>_b1_two_rows_seed42       # B1: scene + counts plots
 python3 -m crop_mot track    --config configs/b2_bernoulli_phantom.yaml  # B2
-python3 -m crop_mot analyse  --run runs/<stamp>_b2_bernoulli_phantom_seed42
+python3 -m crop_mot analyse  --run runs/<stamp>_b2_bernoulli_phantom_seed42 --plots scene r_vs_k r_vs_analytic  # B2 + B3
 python3 -m crop_mot candidates --run runs/<stamp>_b1_two_rows_seed42 --min-distance 1.0  # B2: phantom seeds
 python3 -m crop_mot track    --config configs/b2_bernoulli_bank_phantoms.yaml  # B2: several phantoms, pruned
-python3 -m crop_mot analyse  --run runs/<stamp>_b2_bernoulli_bank_phantoms_seed42 --plots hypotheses hypotheses_anim
+python3 -m crop_mot analyse  --run runs/<stamp>_b2_bernoulli_bank_phantoms_seed42 --plots hypotheses hypotheses_anim r_vs_analytic
 python3 -m crop_mot simulate --config configs/b1_two_rows_weeds.yaml     # B1 with weeds: same field + persistent false targets
 python3 -m crop_mot track    --config configs/b2_bernoulli_bank_weeds.yaml  # B2: the same phantoms, in the field with weeds
 python3 -m pytest tests -q
 ```
 
-While this is a skeleton, the acceptance criterion is: the package imports, the CLI
-resolves all three subcommands, `pytest --collect-only` collects every named test, and
-every test fails with `NotImplementedError` — not `ImportError` or `AttributeError`. That
-proves the wiring is complete and only the mathematics is missing.
+`r_vs_analytic` is the B3 cross-check: every track's `r` against the A2 recursion, one
+figure per track, with the errors and the branches covered written to `metrics.json`. A
+pruned run is checked on its unpruned companion log. `--scene-k` picks the scan the scene
+plot shows. The phantom config also lists `r_montecarlo`, which raises until roadmap
+step 4, so pass `--plots` for it.
+
+While iterating, run `python3 -m pytest tests -q -m "not slow"`; the full suite adds the
+slow tests. A test written before its code exists is marked
+`xfail(strict=True)` with the roadmap step it waits on.
 
 ## A run folder
 
@@ -78,7 +85,8 @@ runs/<timestamp>_<name>_seed<seed>/
                              edge-lost plant ids per scan                (EVAL ONLY)
   detections.jsonl           the only filter input
   estimates_bernoulli.jsonl  one per filter
-  metrics.json
+  estimates_<filter>_unpruned.jsonl   the same filter without pruning, when it prunes
+  metrics.json               the B3 cross-check per track: errors, branch coverage
   plots/
 ```
 
