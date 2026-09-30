@@ -7,10 +7,14 @@ them apart is what makes the validation worth anything:
      Both compute the same recursion from the same event sequence, so they should agree to
      near machine precision. A disagreement is a bug in one of them.
 
-  2. `test_monte_carlo_mean_r_brackets_analytic` - does the DERIVATION match the
-     SIMULATOR? Averaged over many realisations, the mean r should sit inside a few
-     standard errors of the closed form. A disagreement here means the modelling
-     assumptions are wrong, and test 1 would happily pass while both were wrong together.
+  2. `test_per_seed_cross_check_over_random_seeds` - does test 1 hold on every
+     realisation, not just the one it was written against? The same check, repeated over
+     many seeds, with the branches it covered counted (decision D17).
+
+The other question - does the DERIVATION's model match the SIMULATOR? - is not a test
+here. Comparing the mean r over seeds with "the closed form" does not hold in general: r
+is nonlinear in the events, and each seed has its own event sequence. The event-rate model
+check that answers it (roadmap step 4b) is future work.
 """
 
 from __future__ import annotations
@@ -26,8 +30,10 @@ import pytest
 from crop_mot.analysis.analytic import BernoulliExistenceReference, ScanEvent
 from crop_mot.analysis.estimates_log import r_trajectory, read_estimates, track_lifetimes
 from crop_mot.analysis.events import branch_counts, build_scan_events, predicted_track_moments
+from crop_mot.analysis.crosscheck import cross_check_run
 from crop_mot.analysis.metrics import R_TOLERANCE, compare_r
-from crop_mot.config import DetectionConfig, RunConfig
+from crop_mot.analysis.montecarlo import cross_check_summary, run_trials
+from crop_mot.config import DetectionConfig, PruneConfig, RunConfig
 from crop_mot.filters import build_filter
 from crop_mot.runner.analyse import analyse_run
 from crop_mot.runner.run_dir import RunDir
@@ -121,24 +127,37 @@ def test_r_matches_analytic_recursion(
 
 
 @pytest.mark.slow
-@pytest.mark.xfail(strict=True, reason="waits on step 4: reworked into the per-seed "
-                   "cross-check (D17)")
-def test_monte_carlo_mean_r_brackets_analytic(
-    tiny_run_config: RunConfig, tmp_path
-) -> None:
-    """The mean r over many seeds lies within a few standard errors of the closed form. [B3]
+def test_per_seed_cross_check_over_random_seeds(tiny_run_config: RunConfig, tmp_path) -> None:
+    """On every seed, every track's r matches the A2 recursion on its own events. [B3]
 
-    The empirical half of B3: the check that the modelling assumptions - not just the
-    arithmetic - are right.
+    The B3 deliverable of decision D17, replacing the former "mean r brackets the closed
+    form" test. Plain Monte Carlo: seed base + i, independent trials, each seed one
+    outcome (it passes when all its tracks do). A bank of the three CROSS_CHECK_BIRTHS,
+    pruned, so each seed checks several tracks, on the unpruned log (D14).
 
-    Compare against the standard ERROR of the mean (r_std / sqrt(n_runs)), not the standard
-    deviation. The latter measures how much individual runs differ from each other, which
-    for a phantom track is large, and would give a band wide enough to hide a real error.
+    The sentence it supports: "the existence recursion matched A2 to 1e-12 on X scans over
+    n random trials, covering these branches".
 
-    Marked slow: it re-simulates and re-filters the whole scenario n_runs times. Deselect
-    with `-m "not slow"` during ordinary development.
+    Marked slow: it re-simulates and re-filters the scenario n_runs times. Deselect with
+    `-m "not slow"` during ordinary development.
     """
-    raise NotImplementedError
+    cfg = _with_profile(tiny_run_config, "constant")
+    birth = replace(cfg.filter_cfg.birth, kind="from_measurements", seeds=CROSS_CHECK_BIRTHS,
+                    at_scan=CROSS_CHECK_BIRTHS[0][0],
+                    detection_index=CROSS_CHECK_BIRTHS[0][1])
+    cfg = replace(cfg, filter_cfg=replace(cfg.filter_cfg, kind="bernoulli_bank", birth=birth,
+                                          prune=PruneConfig(r_min=1e-3)))
+    n_runs = cfg.analysis.monte_carlo.n_runs
+
+    trials = run_trials(cfg, n_runs, base_seed=1000, runs_base=tmp_path,
+                        measures={"cross_check": cross_check_run})
+    summary = cross_check_summary(trials)
+
+    assert summary.divergences == (), summary.divergences
+    assert summary.n_passed == n_runs - summary.n_without_track
+    assert summary.n_passed >= n_runs // 2
+    assert summary.max_abs_error <= R_TOLERANCE
+    assert all(summary.branches[branch] > 0 for branch in BRANCHES), summary.branches
 
 
 def test_constant_profile_is_the_special_case_of_the_general_recursion() -> None:

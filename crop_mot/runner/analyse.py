@@ -10,22 +10,24 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from dataclasses import asdict
 from pathlib import Path
 
-from crop_mot.analysis.analytic import REFERENCES
-from crop_mot.analysis.estimates_log import (
-    ScanEstimates,
-    r_trajectory,
-    read_estimates,
-    track_lifetimes,
+from crop_mot.analysis.crosscheck import checked_log_name, cross_check_run
+from crop_mot.analysis.estimates_log import ScanEstimates, read_estimates, track_lifetimes
+from crop_mot.analysis.metrics import R_TOLERANCE
+from crop_mot.analysis.montecarlo import (
+    cross_check_summary,
+    first_track_r,
+    mean_r,
+    run_trials,
 )
-from crop_mot.analysis.events import branch_counts, build_scan_events, predicted_track_moments
-from crop_mot.analysis.metrics import R_TOLERANCE, compare_r
 from crop_mot.analysis.plots import (
     animate_hypotheses,
     load_run_folder_config,
     plot_counts,
     plot_hypotheses,
+    plot_r_montecarlo,
     plot_r_vs_analytic,
     plot_r_vs_k,
     plot_scene,
@@ -33,8 +35,6 @@ from crop_mot.analysis.plots import (
 from crop_mot.config import RunConfig, ScenarioConfig
 from crop_mot.io import to_jsonable
 from crop_mot.runner.run_dir import RunDir
-from crop_mot.runner.track import unpruned_log_name
-from crop_mot.sensor.record import read_detections
 
 # Every plot `analyse` knows how to draw, as named in the config's `analysis.plots`.
 PLOT_NAMES = ("scene", "counts", "r_vs_k", "hypotheses", "hypotheses_anim", "r_vs_analytic",
@@ -50,8 +50,10 @@ def analyse_run(run: RunDir, plots: Sequence[str] | None = None,
     """Render the configured plots and write metrics.json for one run folder. [B1/B2/B3]
 
     Reads `run.config`. For a `track` run that is a RunConfig: each requested plot is
-    rendered into run.plots, and `r_vs_analytic` also writes the B3 cross-check to
-    run.metrics (see `_cross_check`). For a simulate-only run it is a ScenarioConfig: only
+    rendered into run.plots; `r_vs_analytic` also writes the B3 cross-check to run.metrics
+    (see `_cross_check`), and `r_montecarlo` the per-seed cross-check over
+    `analysis.monte_carlo.n_runs` seeds (see `_monte_carlo`). For a simulate-only run it is
+    a ScenarioConfig: only
     the B1 plots (SCENARIO_PLOTS) are available, and `plots` defaults to all of them.
 
     Per-track plots (`r_vs_k`, `r_vs_analytic`) are drawn for every track in the estimates
@@ -71,10 +73,10 @@ def analyse_run(run: RunDir, plots: Sequence[str] | None = None,
     Raises:
         ValueError: if a plot name is unknown or needs a filter run the folder does not
             hold; if a per-track plot is requested and the filter never reported a track;
-            if `r_vs_analytic` is requested without `analysis.b3_reference`; or if a B3
-            plot is requested for a scenario whose multiplicity is not "single" (the A2
-            closed form assumes at most one detection per plant).
-        NotImplementedError: for `r_montecarlo`, which waits on roadmap step 4 (D17).
+            if a B3 plot is requested without `analysis.b3_reference`, or `r_montecarlo`
+            without `analysis.monte_carlo`; or if a B3 plot is requested for a scenario
+            whose multiplicity is not "single" (the A2 closed form assumes at most one
+            detection per plant).
     """
     cfg = load_run_folder_config(run)
     if isinstance(cfg, ScenarioConfig):
@@ -119,57 +121,62 @@ def analyse_run(run: RunDir, plots: Sequence[str] | None = None,
         elif name == "r_vs_analytic":
             _cross_check(run, cfg)
         else:
-            raise NotImplementedError(
-                f"plot {name!r} waits on roadmap step 4 (D17): run_monte_carlo becomes the "
-                "per-seed trial loop first"
-            )
+            _monte_carlo(run, cfg, out)
 
 
 def _cross_check(run: RunDir, cfg: RunConfig) -> None:
     """The B3 cross-check of every track, into run.metrics and one r_vs_analytic plot each.
 
-    Each track's r trajectory is compared with the configured analytic reference, evaluated
-    on the event sequence `build_scan_events` builds from that track's predicted moments.
-    When the filter prunes, the check reads the unpruned companion log instead (D14): it is
-    identical up to each deletion and runs on after it, and A2 has no deletion step.
-
-    metrics.json gets a "b3_cross_check" entry: the reference, the log checked, the
-    tolerance, and per track the errors, the first divergence and the branch coverage.
-    Other entries already in the file are kept.
+    `crosscheck.cross_check_run` does the work; a pruning filter is checked on its
+    unpruned companion log (D14). metrics.json gets a "b3_cross_check" entry: the
+    reference, the log checked, the tolerance, and per track the errors, the first
+    divergence and the branch coverage (D26).
     """
-    if cfg.analysis.b3_reference is None:
-        raise ValueError("plot 'r_vs_analytic' needs analysis.b3_reference in the run config")
-    reference = REFERENCES[cfg.analysis.b3_reference](p_S=cfg.filter_cfg.survival.p_S,
-                                                       r_birth=cfg.filter_cfg.birth.r_b)
-    log_name = cfg.filter_cfg.kind
-    if cfg.filter_cfg.prune.r_min > 0.0:
-        log_name = unpruned_log_name(cfg.filter_cfg.kind)
-    records = read_estimates(run.estimates(log_name))
-    times = [scan.t for scan in read_detections(run.detections)]
-
-    track_ids = _track_ids(records, run.estimates(log_name))
+    checks = cross_check_run(run, cfg)
+    log = run.estimates(checked_log_name(cfg.filter_cfg))
+    if not checks:
+        raise ValueError(f"{log} reports no track")
+    track_ids = [check.track_id for check in checks]
     tracks = []
-    for track_id in track_ids:
-        moments = predicted_track_moments(records, track_id, times, cfg.filter_cfg)
-        events = build_scan_events(run.detections, run.labels, cfg.filter_cfg, moments)
-        r_sim = r_trajectory(records, track_id)
-        r_ref = reference.r_sequence(events)
-        comparison = compare_r(r_sim, r_ref)
+    for check in checks:
         plot_r_vs_analytic(
-            r_sim, r_ref, _per_track_png(run, "r_vs_analytic", track_id, track_ids),
-            title=f"{cfg.name}, track {track_id}: filter r against A2 "
-                  f"(max |error| {comparison.max_abs_error:.1e})")
-        tracks.append({"track_id": track_id,
-                       "max_abs_error": comparison.max_abs_error,
-                       "rms_error": comparison.rms_error,
-                       "first_divergence_k": comparison.first_divergence_k,
-                       "branches": branch_counts(events)})
+            check.r_sim, check.r_ref,
+            _per_track_png(run, "r_vs_analytic", check.track_id, track_ids),
+            title=f"{cfg.name}, track {check.track_id}: filter r against A2 "
+                  f"(max |error| {check.comparison.max_abs_error:.1e})")
+        tracks.append({"track_id": check.track_id,
+                       "max_abs_error": check.comparison.max_abs_error,
+                       "rms_error": check.comparison.rms_error,
+                       "first_divergence_k": check.comparison.first_divergence_k,
+                       "branches": check.branches})
+    _write_metrics(run, "b3_cross_check", {"reference": cfg.analysis.b3_reference,
+                                           "estimates_log": log.name,
+                                           "tolerance": R_TOLERANCE,
+                                           "tracks": tracks})
 
+
+def _monte_carlo(run: RunDir, cfg: RunConfig, out: Path) -> None:
+    """The per-seed cross-check over many seeds (D17), and the descriptive mean-r figure.
+
+    Seeds cfg.seed, cfg.seed + 1, ... - the first is this run's own - each simulated,
+    filtered and checked in a temporary folder inside the run folder, deleted afterwards.
+    metrics.json gets a "b3_monte_carlo" entry: the `CrossCheckSummary`. The figure shows
+    the mean r of the first track with its standard-error band, and no closed form: the
+    mean of r is not the closed form at any one event sequence.
+    """
+    if cfg.analysis.b3_reference is None or cfg.analysis.monte_carlo is None:
+        raise ValueError("plot 'r_montecarlo' needs analysis.b3_reference and "
+                         "analysis.monte_carlo in the run config")
+    trials = run_trials(cfg, cfg.analysis.monte_carlo.n_runs, cfg.seed, run.root,
+                        {"r": first_track_r, "cross_check": cross_check_run})
+    plot_r_montecarlo(mean_r(trials), None, out)
+    _write_metrics(run, "b3_monte_carlo", asdict(cross_check_summary(trials)))
+
+
+def _write_metrics(run: RunDir, key: str, value: object) -> None:
+    """Set one entry of run.metrics, keeping the others."""
     metrics = json.loads(run.metrics.read_text(encoding="utf-8")) if run.metrics.is_file() else {}
-    metrics["b3_cross_check"] = {"reference": cfg.analysis.b3_reference,
-                                 "estimates_log": run.estimates(log_name).name,
-                                 "tolerance": R_TOLERANCE,
-                                 "tracks": tracks}
+    metrics[key] = value
     run.metrics.write_text(json.dumps(to_jsonable(metrics), indent=2) + "\n",
                            encoding="utf-8")
 

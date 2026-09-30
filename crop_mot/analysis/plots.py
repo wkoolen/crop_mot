@@ -364,17 +364,21 @@ def plot_r_vs_analytic(
     return _save(fig, out)
 
 
-def plot_r_montecarlo(result: MonteCarloResult, r_ref: np.ndarray, out: Path) -> Path:
-    """Mean r over many seeds, with a confidence band, against the closed form. [B3]
+def plot_r_montecarlo(result: MonteCarloResult, r_ref: np.ndarray | None, out: Path) -> Path:
+    """Mean r over many seeds, with a confidence band. Descriptive (decision D17). [B3]
 
-    The empirical half of B3. Plots the mean plus or minus a few standard errors - NOT plus
-    or minus the standard deviation, which measures the spread of individual runs rather
-    than the uncertainty in the mean, and would produce a band wide enough to hide a real
-    modelling error.
+    Plots the mean plus or minus a few standard errors - NOT plus or minus the standard
+    deviation, which measures the spread of individual runs rather than the uncertainty in
+    the mean.
+
+    The closed form is drawn only when `r_ref` is given, and it is only meaningful where
+    every seed has the same event sequence - a phantom that sees nothing but misses. In
+    general the mean of r is not the closed form at any one event sequence, so `analyse`
+    draws none; the per-seed check is `montecarlo.cross_check_summary`.
 
     Args:
-        result: aggregate from `run_monte_carlo`.
-        r_ref: shape (K,), the closed-form reference.
+        result: aggregate from `run_monte_carlo` or `mean_r`.
+        r_ref: shape (K,), a closed-form reference to draw, or None.
         out: destination PNG path.
 
     Returns:
@@ -388,12 +392,13 @@ def plot_r_montecarlo(result: MonteCarloResult, r_ref: np.ndarray, out: Path) ->
                     linewidth=0, label=f"mean \u00b1 {MC_BAND_SE:g} standard errors")
     ax.plot(k, result.r_mean, color=SERIES_1, linewidth=2.0,
             label=f"mean r over {result.n_runs} runs")
-    ax.plot(k, r_ref, color=SERIES_2, linewidth=2.0, linestyle=(0, (4, 3)),
-            label="closed form (A2)")
+    if r_ref is not None:
+        ax.plot(k, r_ref, color=SERIES_2, linewidth=2.0, linestyle=(0, (4, 3)),
+                label="closed form (A2)")
     ax.set_ylim(-0.02, 1.02)
     ax.set_xlabel("scan k")
     ax.set_ylabel("existence probability r")
-    ax.set_title("Monte-Carlo mean r against the closed form", color=INK, fontsize=11)
+    ax.set_title("Monte-Carlo mean r of the first track (descriptive)", color=INK, fontsize=11)
     ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), frameon=False, fontsize=9)
     return _save(fig, out)
 

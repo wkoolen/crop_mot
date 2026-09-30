@@ -11,7 +11,12 @@ import numpy as np
 import pytest
 
 from crop_mot.analysis.metrics import compare_r
-from crop_mot.analysis.montecarlo import MonteCarloResult, run_monte_carlo, standard_error
+from crop_mot.analysis.montecarlo import (
+    MonteCarloResult,
+    run_monte_carlo,
+    run_trials,
+    standard_error,
+)
 from crop_mot.analysis.plots import plot_r_montecarlo, plot_r_vs_analytic
 from crop_mot.config import RunConfig
 
@@ -49,6 +54,22 @@ def test_monte_carlo_is_reproducible(tiny_run_config: RunConfig, tmp_path) -> No
     assert np.array_equal(first.r_mean, second.r_mean)
     assert np.all((first.r_mean >= 0.0) & (first.r_mean <= 1.0))
     assert list(tmp_path.iterdir()) == []  # per-run folders are cleaned up
+
+
+def test_trial_loop_measures_each_seed_while_its_folder_exists(
+    tiny_run_config: RunConfig, tmp_path
+) -> None:
+    """Each measurement sees its own seed's config and a folder holding the filter's log."""
+    def seen(run, cfg):
+        return (cfg.seed, cfg.scenario.seed, run.estimates(cfg.filter_cfg.kind).is_file())
+
+    trials = run_trials(tiny_run_config, n_runs=3, base_seed=7, runs_base=tmp_path,
+                        measures={"seen": seen})
+
+    assert [trial.seed for trial in trials] == [7, 8, 9]
+    assert [trial.values["seen"] for trial in trials] == [(7, 7, True), (8, 8, True),
+                                                          (9, 9, True)]
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_b3_figures_are_written(tmp_path) -> None:

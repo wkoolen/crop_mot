@@ -11,7 +11,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from crop_mot.analysis.estimates_log import ScanEstimates, write_estimates
-from crop_mot.config import PruneConfig, RunConfig, load_run_config
+from crop_mot.config import FilterConfig, PruneConfig, RunConfig, load_run_config
 from crop_mot.filters import FILTERS, build_filter
 from crop_mot.filters.base import TrackingFilter
 from crop_mot.runner.run_dir import RunDir, create_run_dir
@@ -99,11 +99,26 @@ def track_from_config(config_path: Path, runs_base: Path, run_dir: Path | None =
         run = RunDir(run_dir)
         if not run.detections.is_file():
             raise FileNotFoundError(f"{run.detections} does not exist; simulate first")
-    run_filter(build_filter(cfg.filter_cfg), run)
-    if cfg.filter_cfg.prune.r_min > 0.0:
-        unpruned = replace(cfg.filter_cfg, prune=PruneConfig())
-        run_filter(build_filter(unpruned), run, log_name=unpruned_log_name(cfg.filter_cfg.kind))
+    run_configured_filter(cfg.filter_cfg, run)
     return run
+
+
+def run_configured_filter(filter_cfg: FilterConfig, run: RunDir) -> None:
+    """Run the configured filter over a run folder, and its unpruned companion. [B2/B3]
+
+    The filter writes estimates_<kind>.jsonl. When it prunes (filter.prune.r_min > 0), the
+    same filter is also run with pruning off into estimates_<kind>_unpruned.jsonl
+    (decision D14), on the same detections. Shared by `track_from_config` and the
+    Monte-Carlo trial loop, so both leave the same logs behind.
+
+    Args:
+        filter_cfg: the filter to run.
+        run: the run folder holding detections.jsonl.
+    """
+    run_filter(build_filter(filter_cfg), run)
+    if filter_cfg.prune.r_min > 0.0:
+        unpruned = replace(filter_cfg, prune=PruneConfig())
+        run_filter(build_filter(unpruned), run, log_name=unpruned_log_name(filter_cfg.kind))
 
 
 def unpruned_log_name(filter_name: str) -> str:

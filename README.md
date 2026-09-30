@@ -19,7 +19,7 @@ is [docs/ROADMAP.md](docs/ROADMAP.md).
 |---|---|---|
 | **B1** | Simulator: static plants in rows, known robot path, detector that misses with probability `1 - p_D` and adds Poisson clutter | done; also weeds (persistent false targets) and detection multiplicity |
 | **B2** | Bernoulli filter over B1's output; existence probability `r` per scan, plus the r-decay plot for a phantom (clutter-born) track | done; also a bank of independent Bernoulli tracks with pruning |
-| **B3** | Validation: compare the simulated `r` against the hand-derived closed form (thesis item A2), plus a Monte-Carlo check | single-run cross-check done: every track matches A2 to about 1e-15. The Monte-Carlo half is roadmap step 4 |
+| **B3** | Validation: compare the simulated `r` against the hand-derived closed form (thesis item A2), plus a Monte-Carlo check | cross-check done, per run and per seed over many seeds: every track matches A2 to about 1e-15. Phantom fates and timing are roadmap step 4 |
 | **B4** | PDA, JPDA, PMB, PMBM, and a GNN baseline — phase 2 | interfaces only; built step by step per the roadmap |
 
 ## The pipeline
@@ -67,8 +67,9 @@ python3 -m pytest tests -q
 `r_vs_analytic` is the B3 cross-check: every track's `r` against the A2 recursion, one
 figure per track, with the errors and the branches covered written to `metrics.json`. A
 pruned run is checked on its unpruned companion log. `--scene-k` picks the scan the scene
-plot shows. The phantom config also lists `r_montecarlo`, which raises until roadmap
-step 4, so pass `--plots` for it.
+plot shows. `r_montecarlo` repeats the check over `analysis.monte_carlo.n_runs` seeds,
+one outcome per seed, writes the summary to `metrics.json` and draws the mean r as a
+descriptive figure.
 
 While iterating, run `python3 -m pytest tests -q -m "not slow"`; the full suite adds the
 slow tests. A test written before its code exists is marked
@@ -86,7 +87,7 @@ runs/<timestamp>_<name>_seed<seed>/
   detections.jsonl           the only filter input
   estimates_bernoulli.jsonl  one per filter
   estimates_<filter>_unpruned.jsonl   the same filter without pruning, when it prunes
-  metrics.json               the B3 cross-check per track: errors, branch coverage
+  metrics.json               the B3 cross-check: per track, and per seed over many seeds
   plots/
 ```
 
