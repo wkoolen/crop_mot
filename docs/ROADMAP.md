@@ -493,7 +493,7 @@ Carry these until they are decided, then move each answer into DECISIONS.md.
 | Step | Status | Notes |
 |---|---|---|
 | **0a** | **next** | Priority: fix the B3 interface (`ScanEvent.likelihood_ratios`, `ScanEvent.born`, `build_scan_events` takes (mean, cov)), then implement `r_sequence` and step 3 |
-| 1 | not started | |
+| 1 | done | 2026-09-30: D16 recorded; `generate_path` and the `world/path.py` module docstring updated. No behaviour change |
 | 2 | partial | 2026-09-30: `r_sequence` branches documented. The author drafted them and they were corrected against A2 §2/§3.1/§4 and A0; the author still has to check them line by line. Waiting on: the `ScanEvent` fields (§0a); the A2 rows in `docs/derivations/README.md`. The body still raises `NotImplementedError` |
 | 3 | partial | `compare_r`, `plot_r_vs_analytic` and `plot_r_montecarlo` exist. `build_scan_events` and the three B3 test bodies still raise `NotImplementedError`. `build_scan_events` needs (mean, cov); `analyse` still assumes one track |
 | 4 | partial | `run_monte_carlo` and `standard_error` exist, but `run_monte_carlo` must become the general trial loop (4a); 4a, 4b and 4c not started |
