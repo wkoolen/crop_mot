@@ -36,6 +36,7 @@ from crop_mot.analysis.evaluation import (
     R_CONF,
     cardinality,
     existence_density,
+    gate_contents,
     gospa_series,
     nees,
     nees_band,
@@ -518,6 +519,50 @@ def plot_scaling(result: ScalingResult, out: Path) -> Path:
                  f"sweep of {spec.parameter}, {result.n_seeds} seeds per value", color=INK,
                  fontsize=10)
     ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), frameon=False, fontsize=9)
+    return _save(fig, out)
+
+
+def plot_gate_contents(run: RunDir, filter_name: str, out: Path) -> Path:
+    """What fell in the tracks' gates, by true origin, and the tracks pulled away. [B4, 8a]
+
+    Top: the mean number of gated detections per in-view track, stacked by origin - the
+    track's own plant, a neighbour plant, Poisson clutter, a weed. Bottom: the share of
+    in-view tracks whose mean sits nearer another plant than their own. The failure modes
+    of roadmap step 8a, from the labels; the legend gives the run's shares.
+
+    Args:
+        run: the run folder.
+        filter_name: which estimates log to read.
+        out: destination PNG path.
+
+    Returns:
+        The path written.
+    """
+    contents = gate_contents(run, filter_name)
+    k = np.arange(len(contents.own))
+    shares = contents.shares
+    fig, (ax, ax_pulled) = _new_figure(n_rows=2, height=5.2, height_ratios=[2.0, 1.0])
+    layers = [np.nan_to_num(values) for values in (contents.own, contents.neighbour,
+                                                   contents.clutter, contents.weed)]
+    polygons = ax.stackplot(
+        k, layers, colors=[SERIES_1, SERIES_3, SERIES_2, SERIES_2], edgecolor=SURFACE,
+        linewidth=1.0,
+        labels=["own plant",
+                f"a neighbour plant (in {shares['neighbour_share']:.0%} of gates)",
+                f"Poisson clutter (in {shares['clutter_share']:.0%})",
+                f"a weed (in {shares['weed_share']:.0%})"])
+    polygons[3].set_hatch(WEED_HATCH)
+    ax.set_ylim(bottom=0)
+    ax.set_ylabel("detections per gate")
+    ax.set_title(f"Gate contents by true origin, {filter_name}", color=INK, fontsize=11)
+    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), frameon=False, fontsize=9)
+
+    ax_pulled.plot(k, contents.pulled, color=INK, linewidth=2.0, drawstyle="steps-mid",
+                   label=f"pulled: {shares['pulled_share']:.1%} of track-scans")
+    ax_pulled.set_ylim(-0.02, 1.02)
+    ax_pulled.set_ylabel("share pulled")
+    ax_pulled.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), frameon=False, fontsize=9)
+    _time_axis(ax_pulled, len(k))
     return _save(fig, out)
 
 

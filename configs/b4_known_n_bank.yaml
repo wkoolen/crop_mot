@@ -42,4 +42,4 @@ filter:
 analysis:
   b3_reference: null   # every slot has r = 1 throughout; the A2 check is for births
   monte_carlo: null
-  plots: [scene, tracks, existence_map, cardinality, gospa, nees]
+  plots: [scene, tracks, existence_map, cardinality, gospa, nees, gate_contents]

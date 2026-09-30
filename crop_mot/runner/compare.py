@@ -7,8 +7,9 @@ to each other, one composite per figure. The per-filter figures stay in
 plots/compare/<filter>/ so each can be used on its own.
 
 metrics.json gets a "compare" entry with one row per filter holding the roadmap's evidence
-for choosing a method: accuracy (mean GOSPA), consistency (the share of scans whose
-average NEES lies inside its 95 % band) and cost (median update time per scan).
+for choosing a method: accuracy (mean GOSPA, and the share of tracks pulled onto another
+plant), consistency (the share of scans whose average NEES lies inside its 95 % band) and
+cost (median update time per scan).
 """
 
 from __future__ import annotations
@@ -21,7 +22,13 @@ import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.image import imread
 
-from crop_mot.analysis.evaluation import gospa_series, nees, nees_band, scan_views
+from crop_mot.analysis.evaluation import (
+    gate_contents,
+    gospa_series,
+    nees,
+    nees_band,
+    scan_views,
+)
 from crop_mot.analysis.plots import INK, SURFACE
 from crop_mot.config import load_run_config
 from crop_mot.io import read_jsonl, to_jsonable
@@ -36,7 +43,8 @@ def filter_summary(run: RunDir, filter_name: str) -> dict[str, float]:
     Returns:
         "mean_gospa" in metres; "nees_in_band", the share of scans with at least one NEES
         pair whose average lies inside its 95 % band (NaN when there are none);
-        "median_update_s" over scans 1.. of the timing log.
+        "median_update_s" over scans 1.. of the timing log; "pulled_share", the share of
+        in-view track-scans nearer another plant than their own (`gate_contents`).
     """
     views = scan_views(run, filter_name)
     results = gospa_series(views)
@@ -49,6 +57,7 @@ def filter_summary(run: RunDir, filter_name: str) -> dict[str, float]:
         "mean_gospa": float(np.mean([result.distance for result in results])),
         "nees_in_band": float(inside[paired].mean()) if paired.any() else float("nan"),
         "median_update_s": float(np.median([row["update_s"] for row in timing[1:]])),
+        "pulled_share": gate_contents(run, filter_name).shares["pulled_share"],
     }
 
 

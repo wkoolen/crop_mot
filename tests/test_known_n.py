@@ -120,3 +120,31 @@ def test_a_plan_is_refused_where_it_does_not_belong(tiny_run_config: RunConfig,
         build_filter(replace(tiny_run_config.filter_cfg, kind="bernoulli_bank", plan=plan))
     with pytest.raises(ValueError, match="step 8c"):
         cross_check_run(tiny_run, _known_n(tiny_run_config, plan))
+
+
+def test_gate_contents_on_the_shipped_known_n_run(tmp_path) -> None:
+    """Step 8a's failure modes, from the labels, on the shipped config's own seed (D40).
+
+    Neighbour detections sit in most gates at 0.35 m spacing, yet with a 3.6 cm prior the
+    best branch keeps every plant's own detection: no plant is pulled (seed 42's value).
+    """
+    import os
+
+    from crop_mot.analysis.evaluation import gate_contents
+    from crop_mot.runner.track import track_from_config
+
+    from conftest import REPO_ROOT
+
+    cwd = os.getcwd()
+    os.chdir(REPO_ROOT)  # the config's scenario path is relative to the repo root
+    try:
+        run = track_from_config(CONFIGS / "b4_known_n_bank.yaml", tmp_path)
+    finally:
+        os.chdir(cwd)
+    contents = gate_contents(run, "bernoulli_bank")
+    assert set(contents.shares) == {"neighbour_share", "clutter_share", "weed_share",
+                                    "pulled_share"}
+    assert contents.shares["neighbour_share"] > 0.5
+    assert contents.shares["weed_share"] == 0.0          # no weeds in this field
+    assert contents.shares["pulled_share"] == 0.0
+    assert np.nanmin(contents.own) >= 0.0 and contents.n_tracks.max() > 10

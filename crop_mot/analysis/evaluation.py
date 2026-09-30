@@ -18,12 +18,14 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.stats import chi2
 
-from crop_mot.analysis.estimates_log import ScanEstimates, read_estimates
+from crop_mot.analysis.counts import weed_origin
+from crop_mot.analysis.estimates_log import ScanEstimates, read_estimates, track_lifetimes
+from crop_mot.analysis.events import gated_detection_indices, predicted_track_moments
 from crop_mot.analysis.metrics import GospaResult, gospa
 from crop_mot.config import RunConfig, load_run_config
 from crop_mot.runner.run_dir import RunDir
 from crop_mot.sensor.fov import in_fov
-from crop_mot.sensor.record import read_labels
+from crop_mot.sensor.record import read_detections, read_labels
 from crop_mot.types import TrackEstimate
 from crop_mot.world.truth import GroundTruth, read_truth
 
@@ -215,3 +217,101 @@ def existence_density(tracks: list[TrackEstimate] | tuple[TrackEstimate, ...],
         normaliser = 2.0 * np.pi * np.sqrt(np.linalg.det(P))
         density += track.r * np.exp(-0.5 * mahalanobis_sq) / normaliser
     return density
+
+
+@dataclass(frozen=True)
+class GateContents:
+    """What fell inside each track's gate, by true origin, per scan (roadmap step 8a). [B4]
+
+    The failure modes of a known-N map, measured from the labels: a clutter return, a weed
+    return or a neighbour plant's detection inside a plant's gate, and the plant pulled
+    away. A track's own plant is the true plant nearest its first reported mean - for a
+    planting-plan slot, the plant planted there - so this works for any filter. Only
+    in-view tracks with predicted moments count, i.e. from scan 1 on (the log does not hold
+    the prior of scan 0).
+
+    Attributes:
+        own, neighbour, clutter, weed: shape (K,), mean number of gated detections per
+            in-view track from its own plant, from another plant, from Poisson clutter and
+            from a weed.
+        pulled: shape (K,), the share of in-view tracks whose mean, after the update, is
+            nearer another plant than their own.
+        n_tracks: shape (K,), how many in-view tracks each scan averages over.
+        shares: over all track-scans of the run, the share with at least one neighbour,
+            clutter and weed detection in the gate, and the share pulled (descriptive for
+            one run; across seeds each seed would be one outcome).
+    """
+
+    own: np.ndarray
+    neighbour: np.ndarray
+    clutter: np.ndarray
+    weed: np.ndarray
+    pulled: np.ndarray
+    n_tracks: np.ndarray
+    shares: dict[str, float]
+
+
+def gate_contents(run: RunDir, filter_name: str) -> GateContents:
+    """Gate contents by true origin and pulled tracks, per scan, for one filter's log. [B4]
+
+    The gate is the filter's own, rebuilt from its log (`predicted_track_moments`,
+    `gated_detection_indices`) with the run config's common `measurement` and `gate`
+    blocks - fields every filter shares, not one filter's layout.
+    """
+    cfg = load_run_config(run.config)
+    records = read_estimates(run.estimates(filter_name))
+    truth = read_truth(run.truth)
+    labels = read_labels(run.labels)
+    scans = read_detections(run.detections)
+    fov = cfg.scenario.sensor.fov
+    plants = truth.field.positions
+    plant_ids = truth.field.ids.tolist()
+    times = [scan.t for scan in scans]
+
+    n_scans = len(records)
+    sums = {key: np.zeros(n_scans) for key in ("own", "neighbour", "clutter", "weed", "pulled")}
+    n_tracks = np.zeros(n_scans)
+    any_counts = {"neighbour": 0, "clutter": 0, "weed": 0, "pulled": 0}
+    n_track_scans = 0
+    for track_id, lifetime in track_lifetimes(records).items():
+        first = [e for e in records[lifetime.k_birth].estimates if e.track_id == track_id][0]
+        own = plant_ids[int(np.argmin(np.linalg.norm(plants - first.mean, axis=1)))]
+        moments = predicted_track_moments(records, track_id, times, cfg.filter_cfg)
+        for k, moment in enumerate(moments):
+            if moment is None or not in_fov(moment[0], truth.poses[k].true, fov):
+                continue
+            posterior = [e for e in records[k].estimates if e.track_id == track_id]
+            if not posterior:
+                continue
+            origins = labels[k].origin
+            weeds = weed_origin(labels[k])
+            counts = {"own": 0, "neighbour": 0, "clutter": 0, "weed": 0}
+            for i in gated_detection_indices(scans[k], *moment, cfg.filter_cfg):
+                if weeds[i] is not None:
+                    counts["weed"] += 1
+                elif origins[i] is None:
+                    counts["clutter"] += 1
+                elif origins[i] == own:
+                    counts["own"] += 1
+                else:
+                    counts["neighbour"] += 1
+            nearest = plant_ids[int(np.argmin(np.linalg.norm(plants - posterior[0].mean,
+                                                             axis=1)))]
+            pulled = nearest != own
+            for key, value in counts.items():
+                sums[key][k] += value
+            sums["pulled"][k] += pulled
+            n_tracks[k] += 1
+            n_track_scans += 1
+            for key in ("neighbour", "clutter", "weed"):
+                any_counts[key] += counts[key] > 0
+            any_counts["pulled"] += pulled
+
+    with np.errstate(invalid="ignore", divide="ignore"):
+        means = {key: np.where(n_tracks > 0, value / n_tracks, np.nan)
+                 for key, value in sums.items()}
+    shares = {f"{key}_share": (value / n_track_scans if n_track_scans else float("nan"))
+              for key, value in any_counts.items()}
+    return GateContents(own=means["own"], neighbour=means["neighbour"],
+                        clutter=means["clutter"], weed=means["weed"], pulled=means["pulled"],
+                        n_tracks=n_tracks, shares=shares)
