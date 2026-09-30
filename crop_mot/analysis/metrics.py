@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.optimize import linear_sum_assignment
 
 from crop_mot.types import TrackEstimate
 
@@ -13,6 +14,7 @@ from crop_mot.types import TrackEstimate
 # regression and reduction comparison uses. Absolute, because r saturates near 1, where a
 # relative error on 1 - r or a log-odds error would blow up without meaning anything.
 R_TOLERANCE = 1e-12
+
 
 @dataclass(frozen=True)
 class RComparison:
@@ -75,14 +77,38 @@ def compare_r(
     )
 
 
+@dataclass(frozen=True)
+class GospaResult:
+    """GOSPA at one scan, with its decomposition. [B4]
+
+    With alpha = 2, GOSPA^p splits exactly into three parts:
+        distance^p = localisation + (c^p / 2) * n_missed + (c^p / 2) * n_false,
+    which is what lets a figure show whether a method loses on position, on missed
+    objects or on false tracks.
+
+    Attributes:
+        distance: the GOSPA distance, in metres.
+        localisation: sum of d^p over the assigned pairs, in m^p.
+        n_missed: true objects left unassigned.
+        n_false: estimates left unassigned.
+        pairs: (estimate index, truth index) of every assigned pair, each closer than c.
+    """
+
+    distance: float
+    localisation: float
+    n_missed: int
+    n_false: int
+    pairs: tuple[tuple[int, int], ...]
+
+
 def gospa(
     estimates: Sequence[TrackEstimate],
     truth_positions: np.ndarray,
     c: float,
     p: float = 2.0,
     alpha: float = 2.0,
-) -> float:
-    """Generalised Optimal Sub-Pattern Assignment distance. STUB, phase 2. [B4]
+) -> GospaResult:
+    """Generalised Optimal Sub-Pattern Assignment distance. [B4]
 
     The standard multi-target metric, and the right one for comparing PMBM against JPDA
     against the GNN baseline, because it decomposes into localisation error, missed targets
@@ -91,14 +117,51 @@ def gospa(
     Not used in B1-B3, where there is one hypothesised target and the quantity of interest
     is r rather than a set distance.
 
+    With alpha = 2 (Rahmathullah, Garcia-Fernandez and Svensson, 2017):
+        GOSPA^p = min over assignments of  sum_(i,j) d(x_i, y_j)^p
+                                           + (c^p / 2) (|X| + |Y| - 2 |assignment|),
+    where only pairs closer than c are worth assigning: a pair at d >= c costs as much as
+    one missed object plus one false track. It is computed by an optimal assignment on
+    min(d, c)^p, keeping the pairs with d < c.
+
+    The set of estimates is the caller's choice: r enters only through which tracks are
+    passed in (roadmap step 5 passes the confirmed ones, r > r_conf, decision D28).
+    Changed from the stub's float return to `GospaResult`, so the figure can show the
+    decomposition the stub's docstring names.
+
     Args:
-        estimates: the tracks a filter reported at one scan.
-        truth_positions: shape (n_true, dim_x), true plant positions in view at that scan.
-        c: cutoff distance; errors are capped at c, and c/2 is charged per cardinality error.
+        estimates: the tracks to evaluate at one scan; their means are compared.
+        truth_positions: shape (n_true, dim_x), true plant positions at that scan.
+        c: cutoff distance; errors are capped at c, and c^p / 2 is charged per missed
+            object and per false track.
         p: the norm order, usually 2.
-        alpha: cardinality penalty factor; 2 gives the standard decomposable form.
+        alpha: cardinality penalty factor; only 2, the decomposable form, is implemented.
 
     Returns:
-        The GOSPA distance at this scan.
+        The distance and its decomposition.
+
+    Raises:
+        NotImplementedError: if alpha != 2.
     """
-    raise NotImplementedError
+    if alpha != 2.0:
+        raise NotImplementedError("only alpha = 2 is implemented: it is the form that "
+                                  "splits into localisation, missed and false")
+    means = np.array([estimate.mean for estimate in estimates], dtype=float)
+    truth = np.asarray(truth_positions, dtype=float)
+    n_est, n_true = len(means), len(truth)
+
+    pairs = []
+    localisation = 0.0
+    if n_est and n_true:
+        d = np.linalg.norm(means[:, None, :] - truth[None, :, :], axis=2)
+        rows, cols = linear_sum_assignment(np.minimum(d, c) ** p)
+        for i, j in zip(rows, cols):
+            if d[i, j] < c:
+                pairs.append((int(i), int(j)))
+                localisation += float(d[i, j] ** p)
+
+    n_missed = n_true - len(pairs)
+    n_false = n_est - len(pairs)
+    total = localisation + c**p / 2.0 * (n_missed + n_false)
+    return GospaResult(distance=float(total ** (1.0 / p)), localisation=localisation,
+                       n_missed=n_missed, n_false=n_false, pairs=tuple(pairs))

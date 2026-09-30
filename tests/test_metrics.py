@@ -1,4 +1,4 @@
-"""The B3 comparison and aggregation helpers, independent of the closed form. [B3, added]
+"""The comparison and aggregation helpers: B3's, and GOSPA for step 5. [B3/B4, added]
 
 Added during implementation so that `compare_r`, the Monte-Carlo aggregation and the B3
 figures are checked on their own before the analytic reference exists - a failure in
@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from crop_mot.analysis.metrics import compare_r
+from crop_mot.analysis.metrics import compare_r, gospa
 from crop_mot.analysis.montecarlo import (
     MonteCarloResult,
     run_monte_carlo,
@@ -19,6 +19,7 @@ from crop_mot.analysis.montecarlo import (
 )
 from crop_mot.analysis.plots import plot_r_montecarlo, plot_r_vs_analytic
 from crop_mot.config import RunConfig
+from crop_mot.types import TrackEstimate
 
 
 def test_compare_r_reports_the_first_divergence() -> None:
@@ -80,3 +81,36 @@ def test_b3_figures_are_written(tmp_path) -> None:
     result = MonteCarloResult(r_mean=r_ref, r_std=np.full(10, 0.1), n_runs=25,
                               seeds=tuple(range(25)))
     assert plot_r_montecarlo(result, r_ref, tmp_path / "plots" / "b.png").is_file()
+
+
+def _tracks(*means):
+    return [TrackEstimate(track_id=i, r=1.0, mean=np.asarray(m, dtype=float), cov=np.eye(2))
+            for i, m in enumerate(means)]
+
+
+def test_gospa_by_hand() -> None:
+    """GOSPA (alpha = 2, p = 2, c = 0.5) on cases small enough to do by hand. [B4]"""
+    c = 0.5
+    plants = np.array([[0.0, 0.0], [0.0, 1.0]])
+
+    empty = gospa([], np.empty((0, 2)), c)
+    assert (empty.distance, empty.n_missed, empty.n_false, empty.pairs) == (0.0, 0, 0, ())
+
+    # One track 0.1 m from plant 0, plant 1 missed: 0.1^2 + c^2 / 2.
+    one = gospa(_tracks([0.1, 0.0]), plants, c)
+    assert one.pairs == ((0, 0),) and (one.n_missed, one.n_false) == (1, 0)
+    assert one.localisation == pytest.approx(0.01)
+    assert one.distance == pytest.approx(np.sqrt(0.01 + c**2 / 2))
+
+    # A track 0.6 m from everything is false, not a poor localisation: c^2 / 2 per error.
+    far = gospa(_tracks([0.6, 0.0]), plants[:1], c)
+    assert far.pairs == () and (far.n_missed, far.n_false) == (1, 1)
+    assert far.distance == pytest.approx(c)
+
+    # The optimal assignment, not the listed order: tracks given in reverse.
+    crossed = gospa(_tracks([0.0, 1.05], [0.0, -0.05]), plants, c)
+    assert sorted(crossed.pairs) == [(0, 1), (1, 0)]
+    assert crossed.distance == pytest.approx(np.sqrt(2 * 0.05**2))
+
+    with pytest.raises(NotImplementedError):
+        gospa([], plants, c, alpha=1.0)
