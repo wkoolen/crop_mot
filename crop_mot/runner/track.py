@@ -7,11 +7,13 @@ filter maintains hypotheses. The same nine lines run Bernoulli today and PMBM in
 
 from __future__ import annotations
 
+import time
 from dataclasses import replace
 from pathlib import Path
 
 from crop_mot.analysis.estimates_log import ScanEstimates, write_estimates
 from crop_mot.config import FilterConfig, PruneConfig, RunConfig, load_run_config
+from crop_mot.io import write_jsonl
 from crop_mot.filters import FILTERS, build_filter
 from crop_mot.filters.base import TrackingFilter
 from crop_mot.runner.run_dir import RunDir, create_run_dir
@@ -33,6 +35,11 @@ def run_filter(flt: TrackingFilter, run: RunDir, log_name: str | None = None) ->
     dt is derived from the scan timestamps rather than from the config, so a scenario with
     an irregular or dropped scan does not silently desynchronise the prediction.
 
+    Each call is timed with time.perf_counter, and timing_<log_name>.jsonl gets one record
+    per scan: k, predict_s, update_s, extract_s, n_detections and n_reported (roadmap step
+    4c, decision D29). A separate file, so the estimates log stays deterministic. Scan 0
+    includes warm-up; the analysis reports it apart.
+
     If the filter also satisfies `HasDiagnostics`, its diagnostics are written alongside the
     estimates. Checked with hasattr rather than required, so that a B4 filter that does not
     care about diagnostics is not forced to implement an empty method.
@@ -51,17 +58,26 @@ def run_filter(flt: TrackingFilter, run: RunDir, log_name: str | None = None) ->
             companion run (decision D14), which is the same filter under another log name.
     """
     records = []
+    timing = []
     state = flt.initial_state()
     previous_t = None
     for scan in read_detections(run.detections):
         dt = 0.0 if previous_t is None else scan.t - previous_t
         previous_t = scan.t
+        start = time.perf_counter()
         state = flt.predict(state, dt)
+        predicted = time.perf_counter()
         state = flt.update(state, scan)
+        updated = time.perf_counter()
+        estimates = tuple(flt.extract(state))
+        extracted = time.perf_counter()
         diagnostics = flt.diagnostics(state) if hasattr(flt, "diagnostics") else None
-        records.append(ScanEstimates(k=scan.k, estimates=tuple(flt.extract(state)),
-                                     diagnostics=diagnostics))
+        records.append(ScanEstimates(k=scan.k, estimates=estimates, diagnostics=diagnostics))
+        timing.append({"k": scan.k, "predict_s": predicted - start,
+                       "update_s": updated - predicted, "extract_s": extracted - updated,
+                       "n_detections": len(scan.detections), "n_reported": len(estimates)})
     write_estimates(run.estimates(log_name or flt.name), records)
+    write_jsonl(run.timing(log_name or flt.name), timing)
 
 
 def track_from_config(config_path: Path, runs_base: Path, run_dir: Path | None = None) -> RunDir:

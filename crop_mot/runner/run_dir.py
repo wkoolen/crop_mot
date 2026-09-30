@@ -20,6 +20,7 @@ the same directory, and the fact that they saw identical data is visible in the 
 from __future__ import annotations
 
 import json
+import os
 import platform
 import shutil
 import subprocess
@@ -92,6 +93,19 @@ class RunDir:
         """
         return self.root / f"estimates_{filter_name}.jsonl"
 
+    def timing(self, log_name: str) -> Path:
+        """Path to timing_<log_name>.jsonl, the per-scan computation times (D29).
+
+        A separate file from the estimates log, so the estimates stay deterministic.
+
+        Args:
+            log_name: the estimates log's suffix, e.g. "bernoulli" or "bernoulli_unpruned".
+
+        Returns:
+            The timing log path.
+        """
+        return self.root / f"timing_{log_name}.jsonl"
+
 
 def create_run_dir(base: Path, name: str, seed: int, config_source: Path) -> RunDir:
     """Create a new timestamped run folder and copy the config into it.
@@ -134,8 +148,9 @@ def write_run_meta(run: RunDir, seed: int, argv: list[str]) -> None:
     """Record the provenance of this run.
 
     Captures the seed, the git commit SHA (and whether the tree was dirty), the installed
-    numpy/scipy/matplotlib versions, the Python version, the command line, and a UTC
-    timestamp.
+    numpy/scipy/matplotlib versions, the Python version, the command line, a UTC
+    timestamp, and - for the timing logs (roadmap step 4c, D29) - the BLAS thread settings
+    from the environment and the CPU model, since both change every time measured.
 
     The dirty-tree flag earns its place: "the plot came from commit abc123" is worthless if
     there were uncommitted changes, and that is the normal state of a thesis repo.
@@ -156,6 +171,8 @@ def write_run_meta(run: RunDir, seed: int, argv: list[str]) -> None:
                      for name in ("numpy", "scipy", "matplotlib", "PyYAML")},
         "argv": list(argv),
         "timestamp_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "threads": thread_settings(),
+        "cpu": _cpu_model(),
     }
     status = _git(["status", "--porcelain"])
     if status is not None:
@@ -164,6 +181,27 @@ def write_run_meta(run: RunDir, seed: int, argv: list[str]) -> None:
     with run.meta.open("w", encoding="utf-8", newline="\n") as f:
         json.dump(meta, f, indent=2)
         f.write("\n")
+
+
+def thread_settings() -> dict[str, str | None]:
+    """The BLAS thread variables from the environment; None where unset.
+
+    Timings are only comparable single-threaded: run timed work with OMP_NUM_THREADS=1
+    and OPENBLAS_NUM_THREADS=1 set before Python starts (roadmap step 4c).
+    """
+    return {name: os.environ.get(name)
+            for name in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")}
+
+
+def _cpu_model() -> str | None:
+    """The CPU model name from /proc/cpuinfo, else what platform reports, else None."""
+    try:
+        for line in Path("/proc/cpuinfo").read_text(encoding="utf-8").splitlines():
+            if line.startswith("model name"):
+                return line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    return platform.processor() or None
 
 
 def _git(args: list[str]) -> str | None:
