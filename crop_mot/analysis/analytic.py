@@ -13,6 +13,7 @@ implementation validates both, with no duplicated algebra.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
@@ -44,6 +45,16 @@ class ScanEvent:
         n_gated: how many detections fell inside the gate.
         n_clutter_gated: how many of those were clutter, from labels.jsonl. Evaluation-side
             information, used to interpret a disagreement rather than to compute r.
+        likelihood_ratios: one entry per gated detection, in gate order:
+            ell_i / kappa_i = p_D N(z_i; z_hat, S) / (lambda_FA c(z_i)), evaluated with the
+            filter's ASSUMED sensor, at the filter's predicted moments and the scan's
+            reported pose (decision D25). Dimensionless. math.inf where c(z_i) = 0 and
+            ell_i > 0; 0.0 where p_D = 0. Empty when nothing gated.
+        born: True at exactly one scan of a track's sequence, the scan it is born on: the
+            first scan the track is reported in the estimates log (decision D25).
+
+    Raises:
+        ValueError: if len(likelihood_ratios) != n_gated.
     """
 
     k: int
@@ -53,6 +64,13 @@ class ScanEvent:
     lambda_FA: float
     n_gated: int
     n_clutter_gated: int
+    likelihood_ratios: tuple[float, ...] = ()
+    born: bool = False
+
+    def __post_init__(self) -> None:
+        if len(self.likelihood_ratios) != self.n_gated:
+            raise ValueError(f"scan {self.k}: {len(self.likelihood_ratios)} likelihood ratios "
+                             f"for {self.n_gated} gated detections")
 
 
 class AnalyticReference(Protocol):
@@ -161,23 +179,66 @@ class BernoulliExistenceReference(AnalyticReference):
             the misdetection case is its n = 0 case.
 
         ScanEvent fields:
-          read:      k, in_fov, p_D, lambda_FA, n_gated.
-          not read:  dt (p_S is per scan); n_clutter_gated (interpretation only).
-          MISSING, needed before this can be implemented (an interface change, so it is
-          decided with the author):
-            * the gated detections' ell_i / kappa_i, one per gated detection, e.g.
-              `likelihood_ratios: tuple[float, ...]`, so the detection cases can be
-              evaluated. Without it only miss, out-of-view and birth scans are checkable.
-            * a birth marker, e.g. `born: bool`, True at the birth scan: nothing in the
-              event sequence says where the birth is.
+          read:      k (to check the order), in_fov, p_D, n_gated, likelihood_ratios
+                     (ell_i / kappa_i, so lambda_FA and c(z_i) enter through them), born.
+                     The last two were added for this recursion (decision D25).
+          not read:  dt (p_S is per scan); lambda_FA (inside the ratios);
+                     n_clutter_gated (interpretation only).
 
         Args:
             events: the per-scan event sequence, in increasing k.
 
         Returns:
             Shape (K,) array of r values in [0, 1].
+
+        Raises:
+            ValueError: if events[k].k != k, or if a birth falls on a scan where r is not 0.
         """
-        raise NotImplementedError
+        r_out = np.zeros(len(events))
+        r = 0.0
+        for position, event in enumerate(events):
+            if event.k != position:
+                raise ValueError(f"event at position {position} has k = {event.k}; "
+                                 "the sequence must hold every scan from 0 in order")
+            p_D = event.p_D
+
+            # 1. PREDICTION: the Bernoulli prediction without a birth term.
+            r_pred = self.p_S * r
+
+            # 2. UPDATE of r_pred: exactly one of the four cases.
+            if not event.in_fov:
+                # OUT OF VIEW: not looked at, so not a misdetection.
+                r = r_pred
+            elif event.n_gated == 0:
+                # IN VIEW, NO GATED DETECTION: misdetection [A2 §2].
+                r = r_pred * (1.0 - p_D) / (1.0 - r_pred * p_D)
+            elif math.inf in event.likelihood_ratios:
+                # kappa_i -> 0 at a gated detection gives r_k = 1; r_k < 1 needs
+                # lambda_FA > 0 [A2 §3.1].
+                r = 1.0 if r_pred > 0.0 else 0.0
+            elif event.n_gated == 1:
+                # IN VIEW, ONE GATED DETECTION: r_marg [A2 §3.1], the detected row
+                # (weight r_pred ell_1, r = 1) against the missed row (weight
+                # (1 - r_pred p_D) kappa_1, r = the misdetection result). Numerator and
+                # denominator divided by kappa_1 > 0, so ell_1 / kappa_1 is the ratio.
+                ratio = event.likelihood_ratios[0]
+                r = ((r_pred * ratio + r_pred * (1.0 - p_D))
+                     / (r_pred * ratio + (1.0 - r_pred * p_D)))
+            else:
+                # IN VIEW, TWO OR MORE GATED DETECTIONS: A0 §Measurement model inside
+                # A2 §3.1's two-branch existence (decision D2).
+                L = (1.0 - p_D) + sum(event.likelihood_ratios)
+                r = r_pred * L / ((1.0 - r_pred) + r_pred * L)
+
+            # 3. BIRTH: at the birth scan only, into r = 0 [A2 §4], decision D3.
+            if event.born:
+                if r != 0.0:
+                    raise ValueError(f"birth at scan {event.k} into r = {r}; a birth only "
+                                     "goes into an empty Bernoulli (decision D3)")
+                r = self.r_birth
+
+            r_out[position] = r
+        return r_out
 
 
 # Registry of available references, keyed by the config's `b3_reference` field.

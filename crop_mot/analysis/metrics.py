@@ -9,6 +9,10 @@ import numpy as np
 
 from crop_mot.types import TrackEstimate
 
+# Absolute tolerance on r for the B3 cross-check (decision D18): the same 1e-12 that every
+# regression and reduction comparison uses. Absolute, because r saturates near 1, where a
+# relative error on 1 - r or a log-odds error would blow up without meaning anything.
+R_TOLERANCE = 1e-12
 
 @dataclass(frozen=True)
 class RComparison:
@@ -31,7 +35,9 @@ class RComparison:
     first_divergence_k: int | None
 
 
-def compare_r(r_sim: np.ndarray, r_ref: np.ndarray, tol: float = 1e-9) -> RComparison:
+def compare_r(
+    r_sim: np.ndarray, r_ref: np.ndarray, tol: float = R_TOLERANCE
+) -> RComparison:
     """Compare the filter's r trajectory against the analytic one. [B3]
 
     The tolerance defaults to near machine precision on purpose: this is not a statistical
@@ -45,7 +51,7 @@ def compare_r(r_sim: np.ndarray, r_ref: np.ndarray, tol: float = 1e-9) -> RCompa
     Args:
         r_sim: shape (K,), the filter's existence probability per scan.
         r_ref: shape (K,), the closed form's, from AnalyticReference.r_sequence.
-        tol: absolute tolerance used for first_divergence_k.
+        tol: absolute tolerance used for first_divergence_k; default R_TOLERANCE (D18).
 
     Returns:
         The comparison summary.

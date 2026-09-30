@@ -643,10 +643,10 @@ proposal's outcomes. If PMBM is built:
 
 Carry these until they are decided, then move each answer into DECISIONS.md.
 
-1. The `ScanEvent` fields for the detection branch and the birth scan (step 2). The author
-   decides.
-2. Passing (mean, cov) instead of means to `build_scan_events` (step 3). This is an
-   interface change and needs approval.
+1. ~~The `ScanEvent` fields for the detection branch and the birth scan (step 2).~~
+   Decided: `likelihood_ratios` and `born` (D25).
+2. ~~Passing (mean, cov) instead of means to `build_scan_events` (step 3).~~ Decided:
+   approved by the author on 2026-09-30 (D25).
 3. Which p_D form A2 claims, and which option (A to D) the filter uses (step 3b).
 4. The fate thresholds r_conf and d_match, and the injection position and scan for the
    controlled phantom (step 4a).
@@ -685,7 +685,7 @@ the commit of the step named; the number is reserved so parallel sessions do not
 | Step | Status | Notes |
 |---|---|---|
 | 1 | done | 2026-09-30: D16 reworded to "simplification for now, revisited if RTK is not on the Go2; heading error studied in step 8d" (first recorded as "thesis scope" in c049214). `world/path.py` module and `generate_path` docstrings updated. No behaviour change |
-| 2 | partial | 2026-09-30: `r_sequence` branches documented. The author drafted them and they were corrected against A2 §2/§3.1/§4 and A0; the author still has to check them line by line. Waiting on: approval of the `likelihood_ratios` and `born` fields on `ScanEvent`; the A2 rows in `docs/derivations/README.md`. The body still raises `NotImplementedError` |
+| 2 | done | 2026-09-30: the author checked the `r_sequence` docstring line by line against A2. `ScanEvent` gained `likelihood_ratios` and `born` (D25); the body of `r_sequence` was transcribed from the docstring without opening `filters/bernoulli.py`, and committed before that file was read for the derivation map. Waiting on nothing; the A2 rows of `docs/derivations/README.md` follow in their own commit |
 | 3 | partial | `compare_r`, `plot_r_vs_analytic` and `plot_r_montecarlo` exist. `build_scan_events` and the three B3 test bodies still raise `NotImplementedError`. `build_scan_events` needs (mean, cov); `analyse` still assumes one track; `compare_r` to be checked for absolute error (D18) |
 | 3b | not started | option A wraps current code; B to D stubbed; waits on open question 3 for the choice |
 | 4 | partial | `run_monte_carlo` and `standard_error` exist, but `run_monte_carlo` must become the general trial loop (4a); 4a, 4b and 4c not started |
