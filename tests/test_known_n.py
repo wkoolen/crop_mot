@@ -118,8 +118,10 @@ def test_a_plan_is_refused_where_it_does_not_belong(tiny_run_config: RunConfig,
         build_filter(replace(tiny_run_config.filter_cfg, plan=plan))
     with pytest.raises(ValueError, match="step 13"):
         build_filter(replace(tiny_run_config.filter_cfg, kind="bernoulli_bank", plan=plan))
-    with pytest.raises(ValueError, match="step 8c"):
-        cross_check_run(tiny_run, _known_n(tiny_run_config, plan))
+    no_tracks = _known_n(tiny_run_config, plan)
+    no_tracks = replace(no_tracks, filter_cfg=replace(no_tracks.filter_cfg, plan=None))
+    with pytest.raises(ValueError, match="neither"):
+        cross_check_run(tiny_run, no_tracks)
 
 
 def test_gate_contents_on_the_shipped_known_n_run(tmp_path) -> None:

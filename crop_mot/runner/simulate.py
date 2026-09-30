@@ -52,7 +52,7 @@ def simulate(cfg: ScenarioConfig, run: RunDir, summary: bool = True) -> None:
             hundreds of runs, turns it off.
     """
     streams = substreams(cfg.seed)
-    field = generate_field(cfg.world, streams["field"])
+    field = generate_field(cfg.world, streams["field"], streams["missing"])
     poses = generate_path(cfg.path, streams["path"])
     weeds = generate_weeds(cfg.world.weeds, streams["weeds"])
     truth = GroundTruth(field=field, poses=poses, weeds=weeds)

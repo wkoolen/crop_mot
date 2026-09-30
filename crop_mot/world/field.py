@@ -11,6 +11,7 @@ happens to recur at the same place (decision D15).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 
 import numpy as np
 
@@ -28,14 +29,21 @@ class PlantField:
         row_index: shape (n_plants,), which configured row each plant belongs to. Kept
             because occlusion in RangeDependentPD is defined within a row, and because the
             scene plot colours by row.
+        missing_ids: the slots of the nominal grid that have no plant (roadmap step 8c,
+            D23); a plant's id is its slot index, so ids skip these. Empty by default.
+        missing_positions: shape (n_missing, dim_x), those slots' nominal positions:
+            where the plant would have been.
     """
 
     ids: np.ndarray
     positions: np.ndarray
     row_index: np.ndarray
+    missing_ids: np.ndarray = dataclass_field(default_factory=lambda: np.empty(0, dtype=int))
+    missing_positions: np.ndarray = dataclass_field(default_factory=lambda: np.empty((0, 2)))
 
 
-def generate_field(cfg: WorldConfig, rng_field: np.random.Generator) -> PlantField:
+def generate_field(cfg: WorldConfig, rng_field: np.random.Generator,
+                   rng_missing: np.random.Generator | None = None) -> PlantField:
     """Place plants along each configured row, with planting irregularity.
 
     Each row is filled at `spacing` intervals from y_start to y_end, then every position is
@@ -52,18 +60,29 @@ def generate_field(cfg: WorldConfig, rng_field: np.random.Generator) -> PlantFie
         cfg: row specifications and jitter magnitude.
         rng_field: the "field" substream generator from `crop_mot.rng.substreams`.
 
+        rng_missing: the "missing" substream; needed only when cfg.p_missing > 0.
+
     Returns:
-        A PlantField with ids assigned 0..n_plants-1 in row-major order.
+        A PlantField with ids assigned 0..n_slots-1 in row-major order - one per slot of
+        the nominal grid, so a plant's id is its slot - minus the empty slots.
     """
     # Plants at y_start, y_start + spacing, ... up to and including y_end: the grid the
     # filter's planting plan also uses (`nominal_positions`), here with jitter added.
     nominal, row_index = nominal_positions(cfg.rows)
     jitter = rng_field.normal(0.0, cfg.position_jitter_std, size=nominal.shape)
-    return PlantField(
-        ids=np.arange(len(nominal)),
-        positions=nominal + jitter,
-        row_index=row_index,
-    )
+    ids = np.arange(len(nominal))
+    if cfg.p_missing == 0.0:
+        return PlantField(ids=ids, positions=nominal + jitter, row_index=row_index)
+    # Missing plants (roadmap step 8c, D23): each slot is empty independently with
+    # probability p_missing, from its own stream, after the jitter of every slot is drawn,
+    # so the plants that are there sit exactly where they would without missing ones.
+    if rng_missing is None:
+        raise ValueError("p_missing > 0 needs the 'missing' substream")
+    missing = rng_missing.random(len(nominal)) < cfg.p_missing
+    present = ~missing
+    return PlantField(ids=ids[present], positions=(nominal + jitter)[present],
+                      row_index=row_index[present], missing_ids=ids[missing],
+                      missing_positions=nominal[missing])
 
 
 def generate_weeds(cfg: WeedsConfig | None, rng_weeds: np.random.Generator) -> np.ndarray:

@@ -51,12 +51,18 @@ def write_truth(path: Path, truth: GroundTruth) -> None:
     ({"kind": "weeds", "positions"}, an empty list for a field without weeds); every
     following line is one scan's poses ({"kind": "pose", "k", "t", "true", "reported"}).
     """
-    records = [{
+    field_record = {
         "kind": "field",
         "ids": truth.field.ids,
         "positions": truth.field.positions,
         "row_index": truth.field.row_index,
-    }, {
+    }
+    if len(truth.field.missing_ids):
+        # Only a field with missing plants carries these, so every other truth.jsonl is
+        # unchanged (roadmap step 8c, D23).
+        field_record["missing_ids"] = truth.field.missing_ids
+        field_record["missing_positions"] = truth.field.missing_positions
+    records = [field_record, {
         "kind": "weeds",
         "positions": truth.weeds,
     }]
@@ -93,6 +99,9 @@ def read_truth(path: Path) -> GroundTruth:
                 ids=np.asarray(record["ids"], dtype=int),
                 positions=np.asarray(record["positions"], dtype=float).reshape(-1, 2),
                 row_index=np.asarray(record["row_index"], dtype=int),
+                missing_ids=np.asarray(record.get("missing_ids", []), dtype=int),
+                missing_positions=np.asarray(record.get("missing_positions", []),
+                                             dtype=float).reshape(-1, 2),
             )
         elif record["kind"] == "weeds":
             weeds = np.asarray(record["positions"], dtype=float).reshape(-1, 2)

@@ -151,7 +151,9 @@ def branch_counts(events: list[ScanEvent]) -> dict[str, int]:
 
     A cross-check that passed only on miss scans says nothing about the detection
     branches, so the coverage is reported next to the error. Scans before the birth are
-    counted apart: the reference returns r = 0 there without evaluating a branch.
+    counted apart: the reference returns r = 0 there without evaluating a branch. A
+    sequence with no birth belongs to a track that exists from the start - a planting
+    plan's slot (roadmap step 8c) - and every scan of it counts.
 
     Args:
         events: one track's sequence, from `build_scan_events`.
@@ -162,7 +164,7 @@ def branch_counts(events: list[ScanEvent]) -> dict[str, int]:
     """
     counts = dict.fromkeys(("before_birth", "birth", "out_of_view", "miss", "one_detection",
                             "several_detections"), 0)
-    born = False
+    born = not any(event.born for event in events)
     for event in events:
         if event.born:
             born = True

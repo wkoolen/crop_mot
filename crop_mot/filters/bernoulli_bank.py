@@ -179,12 +179,13 @@ def build_bernoulli_bank(cfg: FilterConfig) -> BernoulliBankFilter:
 
 
 def plan_components(plan: PlanConfig) -> tuple[BernoulliState, ...]:
-    """One component per planned slot, r = 1: the known-N map (roadmap step 8a). [B4]
+    """One component per planned slot at r_0: the known-N or bounded-N map. [B4, 8a/8c]
 
     Slot i is the i-th nominal position of the plan's rows, row by row, with covariance
-    prior_std^2 I, and its track id is i. r = 1 because N is known: certainty is absorbing
-    [A2 §5], so every slot stays at r = 1 and the problem is association and position
-    only. Bounded N (r_0 < 1 per slot) is roadmap step 8c.
+    prior_std^2 I, and its track id is i. With r_0 = 1, N is known (step 8a): certainty is
+    absorbing [A2 §5], so every slot stays at r = 1 and the problem is association and
+    position only. With r_0 < 1, N is bounded by the plan (step 8c, D23): each slot is a
+    Bernoulli that misses can drive down, which is how an empty slot should be found.
 
     Args:
         plan: the planting plan.
@@ -194,5 +195,6 @@ def plan_components(plan: PlanConfig) -> tuple[BernoulliState, ...]:
     """
     positions, _ = nominal_positions(plan.rows)
     cov = plan.prior_std**2 * np.eye(positions.shape[1])
-    return tuple(BernoulliState(r=1.0, mean=position.copy(), cov=cov.copy(), track_id=i)
+    return tuple(BernoulliState(r=plan.r_0, mean=position.copy(), cov=cov.copy(),
+                                track_id=i)
                  for i, position in enumerate(positions))

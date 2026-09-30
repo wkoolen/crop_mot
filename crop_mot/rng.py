@@ -19,7 +19,7 @@ import numpy as np
 # The substreams the pipeline uses. Adding a name here is cheap; renaming one changes every
 # run's output for a given seed, so treat these as part of the reproducibility contract.
 STREAM_NAMES: tuple[str, ...] = ("field", "path", "detection", "clutter", "multiplicity",
-                                 "weeds", "weed_detection", "classifier")
+                                 "weeds", "weed_detection", "classifier", "missing")
 
 
 def stream_key(name: str) -> int:

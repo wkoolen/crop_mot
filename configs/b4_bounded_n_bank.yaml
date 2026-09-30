@@ -1,0 +1,43 @@
+# Roadmap step 8c: N bounded by the planting plan (decision D23). As b4_known_n_bank.yaml,
+# but each planned slot is a Bernoulli that starts at r_0 = 0.9 - matching the field's
+# p_missing = 0.1 - instead of r = 1, and 10 % of the slots are empty. Misses should drive
+# an empty slot's r down; with no births, nothing else can appear.
+#
+# Expected, to confirm: the bank cannot find an empty slot between two plants 0.35 m
+# apart. Its neighbours' detections fall in its gate every scan and, under the bank's
+# independence approximation (D12), raise its r by about +1.3 log-odds per scan (roadmap
+# §5). JIPDA (roadmap step 12) should not have this failure; showing it here is the main
+# motivation for step 12. `missing_plants` measures it.
+
+name: b4_bounded_n_bank
+seed: 42
+
+scenario: configs/b1_two_rows_missing.yaml
+
+filter:
+  kind: bernoulli_bank
+  motion: {kind: static, q: 0.0}
+  measurement:
+    kind: linear_xy
+    R: [[0.04, 0.0],
+        [0.0, 0.04]]
+  assumed_sensor:
+    fov: {min_range: 0.3, max_range: 4.0, half_angle: 0.6}
+    detection: {kind: constant, p_D: 0.85}
+    lambda_FA: 2.0
+  # The farmer's plan: the scenario's rows, nominal positions only (never truth.jsonl).
+  plan:
+    rows:
+      - {x: -0.75, y_start: 0.0, y_end: 12.0, spacing: 0.35}
+      - {x:  0.75, y_start: 0.0, y_end: 12.0, spacing: 0.35}
+    prior_std: 0.036
+    r_0: 0.9           # prior existence per slot: the emergence rate, 1 - p_missing
+  birth: null          # N bounded by the plan: no births
+  survival: {p_S: 1.0}
+  gate: {chi2_prob: 0.99}
+  collapse: best_branch
+
+analysis:
+  b3_reference: null
+  monte_carlo: null
+  plots: [scene, tracks, existence_map, cardinality, gospa, nees, gate_contents]

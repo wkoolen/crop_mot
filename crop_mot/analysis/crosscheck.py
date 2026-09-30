@@ -19,6 +19,7 @@ from crop_mot.analysis.estimates_log import r_trajectory, read_estimates, track_
 from crop_mot.analysis.events import branch_counts, build_scan_events, predicted_track_moments
 from crop_mot.analysis.metrics import RComparison, compare_r
 from crop_mot.config import FilterConfig, RunConfig
+from crop_mot.filters.bernoulli_bank import plan_components
 from crop_mot.runner.run_dir import RunDir
 from crop_mot.runner.track import unpruned_log_name
 from crop_mot.sensor.record import read_detections
@@ -66,21 +67,33 @@ def cross_check_run(run: RunDir, cfg: RunConfig) -> list[TrackCheck]:
         when nothing was born.
 
     Raises:
-        ValueError: if the config names no b3_reference, or the filter has no births.
+        ValueError: if the config names no b3_reference, or the filter has neither
+            births nor a planting plan. A plan's slots are checked from their prior at
+            scan 0, with r starting at the plan's r_0 (roadmap step 8c).
     """
     if cfg.analysis.b3_reference is None:
         raise ValueError("the B3 cross-check needs analysis.b3_reference in the run config")
-    if cfg.filter_cfg.birth is None:
-        raise ValueError("the B3 cross-check follows tracks from a birth; a planting plan's "
-                         "tracks exist before scan 0 and wait on roadmap step 8c")
-    reference = REFERENCES[cfg.analysis.b3_reference](p_S=cfg.filter_cfg.survival.p_S,
-                                                       r_birth=cfg.filter_cfg.birth.r_b)
+    plan = cfg.filter_cfg.plan
+    if cfg.filter_cfg.birth is None and plan is None:
+        raise ValueError("the B3 cross-check needs tracks that are born or planned; this "
+                         "filter has neither")
+    if plan is None:
+        reference = REFERENCES[cfg.analysis.b3_reference](p_S=cfg.filter_cfg.survival.p_S,
+                                                           r_birth=cfg.filter_cfg.birth.r_b)
+    else:
+        reference = REFERENCES[cfg.analysis.b3_reference](p_S=cfg.filter_cfg.survival.p_S,
+                                                           r_birth=0.0, r_initial=plan.r_0)
+        slots = plan_components(plan)
     records = read_estimates(run.estimates(checked_log_name(cfg.filter_cfg)))
     times = [scan.t for scan in read_detections(run.detections)]
 
     checks = []
     for track_id in track_lifetimes(records):
         moments = predicted_track_moments(records, track_id, times, cfg.filter_cfg)
+        if plan is not None:
+            # A slot exists before scan 0: its prior there is the plan's, which the log
+            # does not hold (roadmap step 8c).
+            moments[0] = (slots[track_id].mean, slots[track_id].cov)
         events = build_scan_events(run.detections, run.labels, cfg.filter_cfg, moments)
         r_sim = r_trajectory(records, track_id)
         r_ref = reference.r_sequence(events)

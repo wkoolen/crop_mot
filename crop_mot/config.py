@@ -117,11 +117,15 @@ class WorldConfig:
             each nominal plant position. Drawn from the "field" substream, so it does not
             change when detector parameters change.
         weeds: the weeds, or None for a field without any. Optional in the YAML.
+        p_missing: the probability that a planned slot has no plant (roadmap step 8c,
+            decision D23), independently per slot, drawn from the "missing" substream so
+            the plants that are there do not move. Optional in the YAML, default 0.
     """
 
     rows: tuple[RowConfig, ...]
     position_jitter_std: float
     weeds: WeedsConfig | None = None
+    p_missing: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -455,10 +459,14 @@ class PlanConfig:
             position of `nominal_positions(rows)`, row by row.
         prior_std: prior position standard deviation per axis, metres: the RTK position
             error and the planting accuracy combined, e.g. sqrt(0.02^2 + 0.03^2) = 0.036.
+        r_0: each slot's prior existence probability (roadmap step 8c, D23): below 1 when
+            a planted seed may not have come up, e.g. the emergence rate. 1, the default,
+            is N known (step 8a). Optional in the YAML.
     """
 
     rows: tuple[RowConfig, ...]
     prior_std: float
+    r_0: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -763,12 +771,17 @@ def _parse_rows(raw: Any, where: str) -> tuple[RowConfig, ...]:
 
 
 def _parse_world(raw: Any, where: str) -> WorldConfig:
-    _check_keys(raw, where, required={"rows", "position_jitter_std"}, optional={"weeds"})
+    _check_keys(raw, where, required={"rows", "position_jitter_std"},
+                optional={"weeds", "p_missing"})
+    p_missing = _as_float(raw.get("p_missing", 0.0), f"{where}.p_missing")
+    if not 0.0 <= p_missing < 1.0:
+        raise ValueError(f"{where}.p_missing: expected 0 <= p_missing < 1, got {p_missing}")
     return WorldConfig(rows=_parse_rows(raw["rows"], f"{where}.rows"),
                        position_jitter_std=_as_float(raw["position_jitter_std"],
                                                      f"{where}.position_jitter_std"),
                        weeds=(_parse_weeds(raw["weeds"], f"{where}.weeds")
-                              if "weeds" in raw else None))
+                              if "weeds" in raw else None),
+                       p_missing=p_missing)
 
 
 def _parse_path(raw: Any, where: str) -> PathConfig:
@@ -930,9 +943,13 @@ def _parse_filter(raw: Any, where: str) -> FilterConfig:
 
     plan = raw.get("plan")
     if plan is not None:
-        _check_keys(plan, f"{where}.plan", required={"rows", "prior_std"})
+        _check_keys(plan, f"{where}.plan", required={"rows", "prior_std"}, optional={"r_0"})
+        r_0 = _as_float(plan.get("r_0", 1.0), f"{where}.plan.r_0")
+        if not 0.0 < r_0 <= 1.0:
+            raise ValueError(f"{where}.plan.r_0: expected 0 < r_0 <= 1, got {r_0}")
         plan = PlanConfig(rows=_parse_rows(plan["rows"], f"{where}.plan.rows"),
-                          prior_std=_as_float(plan["prior_std"], f"{where}.plan.prior_std"))
+                          prior_std=_as_float(plan["prior_std"], f"{where}.plan.prior_std"),
+                          r_0=r_0)
 
     prune = raw.get("prune", {})
     _check_keys(prune, f"{where}.prune", required=set(), optional={"r_min"})

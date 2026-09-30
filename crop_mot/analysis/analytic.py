@@ -111,11 +111,15 @@ class BernoulliExistenceReference(AnalyticReference):
             prediction branch leaves r unchanged and every change in r comes from the
             measurement update.
         r_birth: the birth existence probability r_b the filter was configured with.
+        r_initial: r before the first scan. 0, the default, for a track that is born; the
+            slot's r_0 for a planting plan's slot, which exists from the start (roadmap
+            step 8c, D23). An initial condition of the recursion, not a new branch.
         name: "bernoulli_existence".
     """
 
     p_S: float
     r_birth: float
+    r_initial: float = 0.0
     name: str = "bernoulli_existence"
 
     def r_sequence(self, events: Sequence[ScanEvent]) -> np.ndarray:
@@ -133,6 +137,8 @@ class BernoulliExistenceReference(AnalyticReference):
              (the configured constant standing in for A2 §4's e / (e + lambda_FA(z))). The
              seeding detection does not update the new component that scan, so r at the
              birth scan is exactly r_birth. Before the birth scan, r_k = 0.
+        A planting plan's slot is never born: it exists before scan 0 with r = r_initial
+        (its r_0) and follows steps 1 and 2 from scan 0 on (added for roadmap step 8c).
         There is no deletion. Compare a pruned bank track on its unpruned log (D14).
 
         Notation, per scan:
@@ -196,7 +202,7 @@ class BernoulliExistenceReference(AnalyticReference):
             ValueError: if events[k].k != k, or if a birth falls on a scan where r is not 0.
         """
         r_out = np.zeros(len(events))
-        r = 0.0
+        r = self.r_initial
         for position, event in enumerate(events):
             if event.k != position:
                 raise ValueError(f"event at position {position} has k = {event.k}; "
