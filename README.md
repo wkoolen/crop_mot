@@ -61,6 +61,7 @@ python3 -m crop_mot track    --config configs/b2_bernoulli_bank_phantoms.yaml  #
 python3 -m crop_mot analyse  --run runs/<stamp>_b2_bernoulli_bank_phantoms_seed42 --plots hypotheses hypotheses_anim r_vs_analytic
 python3 -m crop_mot simulate --config configs/b1_two_rows_weeds.yaml     # B1 with weeds: same field + persistent false targets
 python3 -m crop_mot track    --config configs/b2_bernoulli_bank_weeds.yaml  # B2: the same phantoms, in the field with weeds
+python3 -m crop_mot analyse  --run runs/<stamp>_b2_bernoulli_bank_weeds_seed42 --plots tracks existence_map cardinality gospa nees lifetimes  # figures for any filter
 python3 -m pytest tests -q
 ```
 
@@ -70,6 +71,12 @@ pruned run is checked on its unpruned companion log. `--scene-k` picks the scan 
 plot shows. `r_montecarlo` repeats the check over `analysis.monte_carlo.n_runs` seeds,
 one outcome per seed, writes the summary to `metrics.json` and draws the mean r as a
 descriptive figure.
+
+`tracks`, `existence_map`, `cardinality`, `gospa`, `nees` and `lifetimes` read only the
+run folder (the filter's estimates log and the truth files), so they work for every filter:
+tracks as ellipses with opacity r, the existence map sum r_i N(x; m_i, P_i), expected
+against true objects in view, GOSPA split into localisation, missed and false, NEES against
+its chi-square band, and each track's birth and deletion.
 
 While iterating, run `python3 -m pytest tests -q -m "not slow"`; the full suite adds the
 slow tests. A test written before its code exists is marked

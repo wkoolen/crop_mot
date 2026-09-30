@@ -78,6 +78,14 @@ WEED_HATCH = "////"
 # Half-width of the Monte-Carlo confidence band, in standard errors of the mean.
 MC_BAND_SE = 3.0
 
+# The reserved status colour for a deleted hypothesis (the palette's "critical"). A status
+# colour, never a series slot, and it always ships with the x icon and a "deleted" label.
+DELETED = "#d03b3b"
+# Floor of the log-r axis in the hypotheses figure; r below it is clipped.
+R_LOG_FLOOR = 1e-5
+# Radius of the uncertainty ellipse drawn at a hypothesis, in standard deviations.
+ELLIPSE_SIGMA = 2.0
+
 # matplotlib's Figure API is used directly, never pyplot: no global figure state and no
 # backend that could try to open a window.
 
@@ -671,13 +679,64 @@ def plot_existence_map(run: RunDir, filter_name: str, out: Path, k: int | None =
     return _save(fig, out)
 
 
-# The reserved status colour for a deleted hypothesis (the palette's "critical"). A status
-# colour, never a series slot, and it always ships with the x icon and a "deleted" label.
-DELETED = "#d03b3b"
-# Floor of the log-r axis in the hypotheses figure; r below it is clipped.
-R_LOG_FLOOR = 1e-5
-# Radius of the uncertainty ellipse drawn at a hypothesis, in standard deviations.
-ELLIPSE_SIGMA = 2.0
+def plot_lifetimes(run: RunDir, filter_name: str, out: Path) -> Path:
+    """Every track's life, from birth to deletion or the last scan. [B4, step 5]
+
+    One row per track: a line from the first to the last scan it is reported, ending in a
+    deletion (the status colour with an x, and the number of scans it lived) or in an open
+    circle when the track is still alive at the last scan. This is the quantity A2 §5 is
+    about: how long a phantom survives before it is deleted. Read from the estimates log
+    alone (`track_lifetimes`), so it works for any filter that has births.
+
+    Args:
+        run: the run folder.
+        filter_name: which estimates log to read.
+        out: destination PNG path.
+
+    Returns:
+        The path written.
+    """
+    records = read_estimates(run.estimates(filter_name))
+    lifetimes = track_lifetimes(records)
+    n_scans = len(records)
+
+    fig, (ax,) = _new_figure(height=max(2.4, 1.2 + 0.32 * len(lifetimes)))
+    for row, (track_id, life) in enumerate(lifetimes.items()):
+        ax.plot([life.k_birth, life.k_last], [row, row], color=SERIES_1, linewidth=2.0,
+                solid_capstyle="round")
+        ax.plot(life.k_birth, row, marker="D", markersize=6, color=SERIES_3,
+                markeredgecolor=SURFACE, linestyle="none")
+        if life.deleted:
+            ax.plot(life.k_last, row, marker="X", markersize=9, color=DELETED,
+                    markeredgecolor=SURFACE, linestyle="none")
+            ax.annotate(f"{life.k_last - life.k_birth + 1} scans", (life.k_last, row),
+                        xytext=(8, 0), textcoords="offset points", va="center",
+                        color=INK_SECONDARY, fontsize=8)
+        else:
+            ax.plot(life.k_last, row, marker="o", markersize=7, markerfacecolor=SURFACE,
+                    markeredgecolor=SERIES_1, markeredgewidth=1.5, linestyle="none")
+
+    handles = [
+        Line2D([], [], color=SERIES_1, linewidth=2.0, label="reported"),
+        Line2D([], [], marker="D", markersize=6, color=SERIES_3, markeredgecolor=SURFACE,
+               linestyle="none", label="birth"),
+        Line2D([], [], marker="X", markersize=9, color=DELETED, markeredgecolor=SURFACE,
+               linestyle="none", label="deleted"),
+        Line2D([], [], marker="o", markersize=7, markerfacecolor=SURFACE,
+               markeredgecolor=SERIES_1, markeredgewidth=1.5, linestyle="none",
+               label="alive at the last scan"),
+    ]
+    ax.set_yticks(range(len(lifetimes)), [f"track {i}" for i in lifetimes])
+    ax.set_ylim(-0.7, max(len(lifetimes), 1) - 0.3)
+    ax.invert_yaxis()
+    _time_axis(ax, n_scans)
+    n_deleted = sum(life.deleted for life in lifetimes.values())
+    ax.set_title(f"Track lifetimes, {filter_name}: {len(lifetimes)} born, {n_deleted} deleted",
+                 color=INK, fontsize=11)
+    ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(1.02, 1.0), frameon=False,
+              fontsize=9)
+    return _save(fig, out)
+
 
 
 @dataclass(frozen=True)

@@ -30,6 +30,7 @@ from crop_mot.analysis.plots import (
     plot_existence_map,
     plot_gospa,
     plot_hypotheses,
+    plot_lifetimes,
     plot_nees,
     plot_r_montecarlo,
     plot_r_vs_analytic,
@@ -43,7 +44,8 @@ from crop_mot.runner.run_dir import RunDir
 
 # Every plot `analyse` knows how to draw, as named in the config's `analysis.plots`.
 PLOT_NAMES = ("scene", "counts", "r_vs_k", "hypotheses", "hypotheses_anim", "r_vs_analytic",
-              "r_montecarlo", "tracks", "existence_map", "cardinality", "gospa", "nees")
+              "r_montecarlo", "tracks", "existence_map", "cardinality", "gospa", "nees",
+              "lifetimes")
 # The step-5 figures that work for any filter: each reads only (run, filter_name).
 ANY_FILTER_PLOTS = {
     "tracks": plot_tracks,
@@ -51,6 +53,7 @@ ANY_FILTER_PLOTS = {
     "cardinality": plot_cardinality,
     "gospa": plot_gospa,
     "nees": plot_nees,
+    "lifetimes": plot_lifetimes,
 }
 # The ones a simulate-only run folder (no filter, no estimates) can draw.
 SCENARIO_PLOTS = ("scene", "counts")
@@ -66,13 +69,14 @@ def analyse_run(run: RunDir, plots: Sequence[str] | None = None,
     rendered into run.plots; `r_vs_analytic` also writes the B3 cross-check to run.metrics
     (see `_cross_check`), and `r_montecarlo` the per-seed cross-check over
     `analysis.monte_carlo.n_runs` seeds (see `_monte_carlo`). For a simulate-only run it is
-    a ScenarioConfig: only
-    the B1 plots (SCENARIO_PLOTS) are available, and `plots` defaults to all of them.
+    a ScenarioConfig: only the B1 plots (SCENARIO_PLOTS) are available, and `plots`
+    defaults to all of them.
 
     Per-track plots (`r_vs_k`, `r_vs_analytic`) are drawn for every track in the estimates
     log: `<plot>.png` when there is one track, `<plot>_track<id>.png` when there are
-    several. Relative paths inside the config copy resolve against the working directory,
-    as for `track`.
+    several. The ANY_FILTER_PLOTS (roadmap step 5, D32) read only the run folder and the
+    filter's name. Relative paths inside the config copy resolve against the working
+    directory, as for `track`.
 
     Args:
         run: the run folder to analyse.
