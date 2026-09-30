@@ -60,8 +60,8 @@ filter:
   prune: {r_min: 1.0e-3}
 
 analysis:
-  # The bank is not what B3's closed form describes (several tracks, pruning), so no
-  # cross-check here; one-seed banks are checked against the single filter in the tests.
-  b3_reference: null
+  # Every bank track is the A2 recursion (D12), so each is checked against the closed form.
+  # Pruning has no counterpart in A2, so the check reads the unpruned companion log (D14).
+  b3_reference: bernoulli_existence
   monte_carlo: null
-  plots: [scene, hypotheses]
+  plots: [scene, hypotheses, r_vs_analytic]

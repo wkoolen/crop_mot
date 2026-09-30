@@ -55,6 +55,9 @@ def build_parser() -> argparse.ArgumentParser:
     analyse.add_argument("--run", type=Path, required=True, help="run folder to analyse")
     analyse.add_argument("--plots", nargs="+", default=None,
                          help="plots to render; default: the config's analysis.plots")
+    analyse.add_argument("--scene-k", type=int, default=None,
+                         help="scan the scene plot shows; default: the first scan a track "
+                              "is reported, or 0")
 
     candidates = commands.add_parser(
         "candidates", help="[B2] list clutter detections usable as phantom seeds")
@@ -88,7 +91,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         else:
             run = RunDir(args.run)
-            analyse_run(run, plots=args.plots)
+            analyse_run(run, plots=args.plots, scene_k=args.scene_k)
     except (ValueError, KeyError, FileNotFoundError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2

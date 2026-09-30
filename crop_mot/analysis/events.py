@@ -13,6 +13,7 @@ which is a different question and is what the Monte-Carlo half answers.
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import numpy as np
@@ -21,9 +22,12 @@ from crop_mot.analysis.analytic import ScanEvent
 from crop_mot.analysis.estimates_log import ScanEstimates
 from crop_mot.association.gating import chi2_threshold, gate_measurements
 from crop_mot.config import FilterConfig
-from crop_mot.filters.kalman import kf_predict, predicted_measurement
+from crop_mot.filters.kalman import kf_predict, log_predicted_likelihood, predicted_measurement
 from crop_mot.motion.models import StaticTarget
+from crop_mot.sensor.fov import in_fov
 from crop_mot.sensor.models import build_measurement_model
+from crop_mot.sensor.record import read_detections, read_labels
+from crop_mot.sensor.sensor_model import build_sensor_model
 from crop_mot.types import Scan
 
 
@@ -31,7 +35,7 @@ def build_scan_events(
     detections_path: Path,
     labels_path: Path,
     cfg: FilterConfig,
-    track_mean_per_scan: list[np.ndarray],
+    track_moments_per_scan: list[tuple[np.ndarray, np.ndarray] | None],
 ) -> list[ScanEvent]:
     """Assemble the ScanEvent sequence for the B3 cross-check.
 
@@ -41,13 +45,30 @@ def build_scan_events(
         value each scan, and a constant profile produces the same one every scan;
       * record whether that location was inside the assumed FOV;
       * count how many detections fell inside the gate, and - from labels.jsonl, which only
-        this side of the pipeline may read - how many of those were clutter.
+        this side of the pipeline may read - how many of those were clutter;
+      * for each gated detection z_i, the likelihood ratio
+        ell_i / kappa_i = p_D N(z_i; z_hat, S) / (lambda_FA c(z_i)), with z_hat and S from
+        the shared `predicted_measurement` and N from `log_predicted_likelihood`, so the
+        Gaussian algebra is the filter's own and never a suspect;
+      * whether the track is born at this scan.
 
-    Takes the filter's per-scan predicted mean as an argument rather than recomputing it,
-    because p_D at the hypothesised state is only well defined relative to where the filter
-    thought the target was. Recomputing it here would risk silently evaluating a different
-    trajectory than the one the filter actually followed, and the resulting mismatch would
-    look like a bug in the closed form.
+    Takes the filter's per-scan predicted moments as an argument rather than recomputing
+    them, because p_D at the hypothesised state is only well defined relative to where the
+    filter thought the target was. Recomputing them here would risk silently evaluating a
+    different trajectory than the one the filter actually followed, and the resulting
+    mismatch would look like a bug in the closed form. The covariance is needed as well as
+    the mean: the gate and the likelihood both use S = H P H' + R (decision D25).
+
+    The birth scan follows from the moments: the track is first reported at its birth
+    scan, so the first non-None predicted moments are one scan later. Deriving it from the
+    log rather than from the birth config makes it work for any birth model. Scans up to
+    and including the birth have no moments; they get in_fov False, p_D 0, nothing gated,
+    and `born` True at the birth scan only.
+
+    What this makes the B3 check verify, and what it does not: the reference receives the
+    filter's own predicted moments and its own ell_i / kappa_i, so it checks the EXISTENCE
+    recursion given those. An error in the Gaussian update, in gating or in how p_D is
+    evaluated is invisible to it, because both sides see the same numbers.
 
     Serves: [B3].
 
@@ -55,12 +76,102 @@ def build_scan_events(
         detections_path: run.detections.
         labels_path: run.labels. EVALUATION ONLY.
         cfg: the filter config, supplying the ASSUMED sensor model and the gate.
-        track_mean_per_scan: the filter's predicted mean at each scan, from the estimates log.
+        track_moments_per_scan: the filter's predicted (mean, cov) at each scan, or None
+            where the track was not reported at the previous scan - exactly what
+            `predicted_track_moments` returns. For a pruned bank track, build it from the
+            unpruned companion log (decision D14).
 
     Returns:
         One ScanEvent per scan, in increasing k.
+
+    Raises:
+        ValueError: if the moments and the scans differ in length; if the track is never
+            reported before the last scan (no birth to find); or if the moments stop after
+            the birth, i.e. the track was deleted - A2 has no deletion step.
     """
-    raise NotImplementedError
+    scans = read_detections(detections_path)
+    labels = read_labels(labels_path)
+    if len(track_moments_per_scan) != len(scans):
+        raise ValueError(f"{len(track_moments_per_scan)} predicted moments for {len(scans)} "
+                         "scans; were they read from another run?")
+    reported = [k for k, moments in enumerate(track_moments_per_scan) if moments is not None]
+    if not reported:
+        raise ValueError("the track has no predicted moments at any scan, so there is no "
+                         "birth to check from; it was never reported before the last scan")
+    k_birth = reported[0] - 1
+
+    measurement = build_measurement_model(cfg.measurement)
+    assumed = cfg.assumed_sensor
+    sensor = build_sensor_model(assumed.fov, assumed.detection, assumed.lambda_FA, measurement)
+
+    events = []
+    for scan, scan_labels, moments in zip(scans, labels, track_moments_per_scan):
+        dt = 0.0 if scan.k == 0 else scan.t - scans[scan.k - 1].t
+        lambda_FA = sensor.lambda_FA(scan.pose)
+        if moments is None:
+            if scan.k > k_birth:
+                raise ValueError(f"the track was deleted after scan {scan.k - 1}; A2 has no "
+                                 "deletion step, so check it on the unpruned log (D14)")
+            events.append(ScanEvent(k=scan.k, dt=dt, in_fov=False, p_D=0.0,
+                                    lambda_FA=lambda_FA, n_gated=0, n_clutter_gated=0,
+                                    born=scan.k == k_birth))
+            continue
+
+        mean, cov = moments
+        p_D = sensor.p_D(mean, scan.pose)
+        z_hat, S = predicted_measurement(mean, cov, measurement, scan.pose)
+        gated = gated_detection_indices(scan, mean, cov, cfg)
+        ratios = []
+        for i in gated:
+            z = scan.detections[i].z
+            ell = p_D * np.exp(log_predicted_likelihood(z, z_hat, S))
+            kappa = lambda_FA * sensor.clutter_density(z, scan.pose)
+            if ell == 0.0:
+                ratios.append(0.0)
+            elif kappa == 0.0:
+                ratios.append(math.inf)
+            else:
+                ratios.append(float(ell / kappa))
+        n_clutter_gated = sum(1 for i in gated if scan_labels.origin[i] is None)
+        events.append(ScanEvent(k=scan.k, dt=dt, in_fov=in_fov(mean, scan.pose, assumed.fov),
+                                p_D=p_D, lambda_FA=lambda_FA, n_gated=len(gated),
+                                n_clutter_gated=n_clutter_gated,
+                                likelihood_ratios=tuple(ratios)))
+    return events
+
+
+def branch_counts(events: list[ScanEvent]) -> dict[str, int]:
+    """How many scans of each branch of the A2 recursion an event sequence exercises. [B3]
+
+    A cross-check that passed only on miss scans says nothing about the detection
+    branches, so the coverage is reported next to the error. Scans before the birth are
+    counted apart: the reference returns r = 0 there without evaluating a branch.
+
+    Args:
+        events: one track's sequence, from `build_scan_events`.
+
+    Returns:
+        Counts under the keys "before_birth", "birth", "out_of_view", "miss",
+        "one_detection" and "several_detections"; they sum to len(events).
+    """
+    counts = dict.fromkeys(("before_birth", "birth", "out_of_view", "miss", "one_detection",
+                            "several_detections"), 0)
+    born = False
+    for event in events:
+        if event.born:
+            born = True
+            counts["birth"] += 1
+        elif not born:
+            counts["before_birth"] += 1
+        elif not event.in_fov:
+            counts["out_of_view"] += 1
+        elif event.n_gated == 0:
+            counts["miss"] += 1
+        elif event.n_gated == 1:
+            counts["one_detection"] += 1
+        else:
+            counts["several_detections"] += 1
+    return counts
 
 
 def predicted_track_moments(
