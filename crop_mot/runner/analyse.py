@@ -25,6 +25,7 @@ from crop_mot.analysis.montecarlo import (
     run_trials,
 )
 from crop_mot.analysis.plots import (
+    animate_existence_map,
     animate_hypotheses,
     load_run_folder_config,
     plot_cardinality,
@@ -50,7 +51,8 @@ from crop_mot.runner.run_dir import RunDir
 # Every plot `analyse` knows how to draw, as named in the config's `analysis.plots`.
 PLOT_NAMES = ("scene", "counts", "r_vs_k", "hypotheses", "hypotheses_anim", "r_vs_analytic",
               "r_montecarlo", "phantom_fates", "tracks", "existence_map", "cardinality",
-              "gospa", "nees", "lifetimes", "gate_contents", "missing_plants")
+              "gospa", "nees", "lifetimes", "gate_contents", "missing_plants",
+              "existence_anim")
 # The step-5 figures that work for any filter: each reads only (run, filter_name).
 ANY_FILTER_PLOTS = {
     "tracks": plot_tracks,
@@ -143,6 +145,8 @@ def analyse_run(run: RunDir, plots: Sequence[str] | None = None,
             plot_hypotheses(run, filter_name, out)
         elif name == "hypotheses_anim":
             animate_hypotheses(run, filter_name, run.plots / "hypotheses.gif")
+        elif name == "existence_anim":
+            animate_existence_map(run, filter_name, run.plots / "existence_map.gif")
         elif name == "r_vs_analytic":
             _cross_check(run, cfg)
         elif name == "r_montecarlo":

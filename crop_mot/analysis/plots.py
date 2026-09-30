@@ -23,7 +23,7 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Ellipse, Patch, Wedge
 from matplotlib.ticker import FuncFormatter, MaxNLocator
 
-from crop_mot.analysis.counts import scan_counts, weed_origin
+from crop_mot.analysis.counts import origin_kinds, scan_counts, weed_origin
 from crop_mot.analysis.estimates_log import (
     TrackLifetime,
     r_trajectory,
@@ -1354,3 +1354,268 @@ def animate_hypotheses(run: RunDir, filter_name: str, out: Path, fps: float = 4.
             writer.grab_frame(facecolor=SURFACE)
     return out
 
+
+# Grid spacing of the animated existence map, metres: fine enough that a converged track
+# (posterior std about 3 cm) is more than one cell wide.
+MOVIE_GRID_STEP = 0.02
+# The empty slots of the plan (step 8c), in truth: a hollow square in the clutter orange -
+# a place where a track should find nothing.
+EMPTY_SLOT_MARKER = "s"
+# The animated map's window, metres behind and ahead of the robot along the lane: the FOV
+# reaches 4 m ahead, and the rest shows slots not yet seen at their prior.
+MOVIE_WINDOW = (1.5, 5.5)
+
+
+@dataclass(frozen=True)
+class _ExistenceMovie:
+    """Everything the existence-map animation draws, loaded and summarised once."""
+
+    filter_name: str
+    truth: object
+    scans: list
+    kinds: list                  # per scan, each detection's true origin kind
+    records: list
+    fov: object
+    xs: np.ndarray
+    ys: np.ndarray
+    vmax: float                  # the colour scale's top, fixed over frames
+    drops_weed_labels: bool      # the filter ignores weed-labelled detections (D22)
+    by_origin: dict              # per origin kind, detections per scan, shape (K,)
+    gates: object                # evaluation.GateContents
+    mean_r: np.ndarray           # (K,) mean r of the tracks in view, NaN without any
+    median_std: np.ndarray       # (K,) their median position std, metres
+    in_a_gate: list              # per scan, the detections inside at least one track's gate
+
+
+def _load_existence_movie(run: RunDir, filter_name: str) -> _ExistenceMovie:
+    cfg = load_run_config(run.config)
+    truth = read_truth(run.truth)
+    scans = read_detections(run.detections)
+    kinds = [origin_kinds(label) for label in read_labels(run.labels)]
+    records = read_estimates(run.estimates(filter_name))
+
+    points = [np.array([[s.true.x, s.true.y] for s in truth.poses]), truth.field.positions,
+              truth.weeds.reshape(-1, 2), truth.field.missing_positions.reshape(-1, 2)]
+    points = np.vstack(points)
+    x0, y0 = points.min(axis=0) - 0.6
+    x1, y1 = points.max(axis=0) + 0.6
+    # A track's density peaks at r / (2 pi sqrt(det P)); the brightest peak over the run
+    # tops the fixed colour scale, so a slot visibly gains certainty frame by frame.
+    peaks = [e.r / (2.0 * np.pi * np.sqrt(np.linalg.det(e.cov[:2, :2])))
+             for record in records for e in record.estimates]
+
+    # Which detections reached some track's gate, as the filter gated them: the ones that
+    # could move a track. With an assumed classifier, weed-labelled ones never do (D22).
+    in_a_gate = [set() for _ in scans]
+    times = [scan.t for scan in scans]
+    for track_id in track_lifetimes(records):
+        moments = predicted_track_moments(records, track_id, times, cfg.filter_cfg)
+        for k, moment in enumerate(moments):
+            if moment is not None:
+                in_a_gate[k].update(
+                    int(i) for i in gated_detection_indices(scans[k], *moment, cfg.filter_cfg))
+
+    views = scan_views(run, filter_name, cfg)
+    mean_r = np.array([np.mean([t.r for t in v.tracks]) if v.tracks else np.nan
+                       for v in views])
+    median_std = np.array([np.median([np.sqrt(np.trace(t.cov[:2, :2]) / 2.0)
+                                      for t in v.tracks]) if v.tracks else np.nan
+                           for v in views])
+    return _ExistenceMovie(
+        filter_name=filter_name, truth=truth, scans=scans, kinds=kinds, records=records,
+        fov=cfg.scenario.sensor.fov,
+        xs=np.arange(x0, x1 + MOVIE_GRID_STEP, MOVIE_GRID_STEP),
+        ys=np.arange(y0, y1 + MOVIE_GRID_STEP, MOVIE_GRID_STEP),
+        vmax=max(peaks) if peaks else 1.0,
+        drops_weed_labels=cfg.filter_cfg.assumed_classifier is not None,
+        by_origin={kind: np.array([ks.count(kind) for ks in kinds])
+                   for kind in ("plant", "clutter", "weed")},
+        gates=gate_contents(run, filter_name),
+        mean_r=mean_r, median_std=median_std, in_a_gate=in_a_gate,
+    )
+
+
+def _existence_movie_figure() -> tuple[Figure, object, list]:
+    """The map on the left, four time series stacked on the right, sharing x."""
+    fig = Figure(figsize=(12.0, 8.0), facecolor=SURFACE, layout="constrained")
+    grid = fig.add_gridspec(4, 2, width_ratios=[1.0, 1.35])
+    scene = fig.add_subplot(grid[:, 0])
+    series = []
+    for i in range(4):
+        series.append(fig.add_subplot(grid[i, 1], sharex=series[0] if series else None))
+    return fig, scene, series
+
+
+def _draw_existence_frame(movie: _ExistenceMovie, scene, series, k: int, colorbar) -> None:
+    """One frame: the map after scan k, and every series up to k."""
+    truth = movie.truth
+    tracks = movie.records[k].estimates
+    pose = truth.poses[k].true
+    # A window that follows the robot, MOVIE_WINDOW behind and ahead: at the scale of the
+    # whole field a converged track (std about 3 cm) would be a single pixel.
+    behind, ahead = MOVIE_WINDOW
+    ys = movie.ys[(movie.ys >= pose.y - behind) & (movie.ys <= pose.y + ahead)]
+    density = existence_density(tracks, movie.xs, ys)
+    image = scene.imshow(density, origin="lower", cmap=EXISTENCE_CMAP,
+                         norm=PowerNorm(gamma=0.5, vmin=0.0, vmax=movie.vmax),
+                         extent=(movie.xs[0], movie.xs[-1], ys[0], ys[-1]),
+                         interpolation="nearest")
+    if colorbar is not None:
+        colorbar.update_normal(image)
+    scene.add_patch(_fov_wedge(pose, movie.fov, facecolor="none", edgecolor=INK_SECONDARY))
+    path = np.array([[s.true.x, s.true.y] for s in truth.poses[:k + 1]])
+    scene.plot(path[:, 0], path[:, 1], color=INK, linewidth=2.0)
+    scene.plot(pose.x, pose.y, marker="o", markersize=8, color=INK, markeredgecolor=SURFACE,
+               markeredgewidth=2.0, linestyle="none")
+    hollow = {"markerfacecolor": "none", "linestyle": "none"}
+    scene.plot(*truth.field.positions.T, marker="o", markersize=5,
+               markeredgecolor=INK_SECONDARY, markeredgewidth=0.8, **hollow)
+    if len(truth.weeds):
+        scene.plot(*truth.weeds.T, marker=WEED_MARKER, markersize=7,
+                   markeredgecolor=INK_SECONDARY, markeredgewidth=1.0, **hollow)
+    if len(truth.field.missing_positions):
+        scene.plot(*truth.field.missing_positions.T, marker=EMPTY_SLOT_MARKER, markersize=7,
+                   markeredgecolor=SERIES_2, markeredgewidth=1.2, **hollow)
+
+    style = {"plant": ("o", INK, 4), "clutter": ("X", SERIES_2, 8),
+             "weed": (WEED_MARKER, SERIES_2, 8)}
+    for i, (detection, kind) in enumerate(zip(movie.scans[k].detections, movie.kinds[k])):
+        marker, colour, size = style[kind]
+        dropped = movie.drops_weed_labels and detection.label == "weed"
+        if kind != "plant" and i in movie.in_a_gate[k]:
+            # A false return that reached a track's gate: it can move that track.
+            scene.plot(*detection.z[:2], marker="o", markersize=15, linestyle="none",
+                       markerfacecolor="none", markeredgecolor=SERIES_2, markeredgewidth=1.5)
+        scene.plot(*detection.z[:2], marker=marker, markersize=size, linestyle="none",
+                   color=colour, markeredgecolor=colour if dropped else SURFACE,
+                   markerfacecolor="none" if dropped else colour, markeredgewidth=1.2)
+    scene.set_xlim(movie.xs[0], movie.xs[-1])
+    scene.set_ylim(pose.y - behind, pose.y + ahead)
+    scene.set_aspect("equal")
+    scene.set_xlabel("x [m]")
+    scene.set_ylabel("y [m]")
+    n_false = sum(1 for i, kind in enumerate(movie.kinds[k])
+                  if kind != "plant" and i in movie.in_a_gate[k])
+    scene.set_title(f"Existence map after scan {k}: sum of r = "
+                    f"{sum(t.r for t in tracks):.1f}\n{n_false} false return(s) in a gate",
+                    color=INK, fontsize=11)
+    _existence_movie_legend(scene, movie)
+
+    kk = np.arange(k + 1)
+    n_scans = len(movie.scans)
+    ax_det, ax_gate, ax_r, ax_std = series
+    for ax in series:
+        _style_axes(ax)
+        ax.set_xlim(-0.5, n_scans - 0.5)
+        ax.axvline(k, color=INK_SECONDARY, linewidth=1.0)
+
+    bar = {"width": 0.9, "edgecolor": SURFACE, "linewidth": 0.8}
+    plant, clutter, weed = (movie.by_origin[kind][:k + 1]
+                            for kind in ("plant", "clutter", "weed"))
+    ax_det.bar(kk, plant, color=SERIES_1, label="from a plant", **bar)
+    ax_det.bar(kk, clutter, bottom=plant, color=SERIES_2, label="clutter", **bar)
+    ax_det.bar(kk, weed, bottom=plant + clutter, color=SERIES_2, hatch=WEED_HATCH,
+               label="from a weed", **bar)
+    top = (movie.by_origin["plant"] + movie.by_origin["clutter"] + movie.by_origin["weed"]).max()
+    ax_det.set_ylim(0, top + 1)
+    ax_det.set_ylabel("detections")
+    ax_det.set_title("Detections per scan, by true origin", color=INK, fontsize=10)
+    ax_det.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), frameon=False, fontsize=8)
+
+    gates = movie.gates
+    layers = [np.nan_to_num(v[:k + 1]) for v in (gates.neighbour, gates.clutter, gates.weed)]
+    polygons = ax_gate.stackplot(kk, layers, colors=[SERIES_3, SERIES_2, SERIES_2],
+                                 edgecolor=SURFACE, linewidth=0.8,
+                                 labels=["a neighbour plant", "clutter", "a weed"])
+    polygons[2].set_hatch(WEED_HATCH)
+    full = np.nan_to_num(gates.neighbour + gates.clutter + gates.weed)
+    ax_gate.set_ylim(0, max(full.max(), 0.1) * 1.1)
+    ax_gate.set_ylabel("per gate")
+    ax_gate.set_title("Returns not from the track's own plant, inside its gate", color=INK,
+                      fontsize=10)
+    ax_gate.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), frameon=False, fontsize=8)
+
+    ax_r.plot(kk, movie.mean_r[:k + 1], color=SERIES_1, linewidth=2.0)
+    ax_r.set_ylim(-0.02, 1.02)
+    ax_r.set_ylabel("mean r")
+    ax_r.set_title("Existence of the tracks in view", color=INK, fontsize=10)
+
+    ax_std.plot(kk, 100.0 * movie.median_std[:k + 1], color=SERIES_1, linewidth=2.0)
+    ax_std.set_ylim(0, 100.0 * np.nanmax(movie.median_std) * 1.1)
+    ax_std.set_ylabel("std [cm]")
+    ax_std.set_xlabel("scan k")
+    ax_std.set_title("Median position std of the tracks in view", color=INK, fontsize=10)
+
+
+def _existence_movie_legend(ax, movie: _ExistenceMovie) -> None:
+    def marker(label, **style):
+        return Line2D([], [], linestyle="none", label=label, **style)
+
+    handles = [
+        Line2D([], [], color=INK, linewidth=2.0, label="robot path"),
+        marker("plant (truth)", marker="o", markersize=5, markerfacecolor="none",
+               markeredgecolor=INK_SECONDARY),
+        marker("detection from a plant", marker="o", markersize=4, color=INK,
+               markeredgecolor=SURFACE),
+        marker("clutter detection", marker="X", markersize=8, color=SERIES_2,
+               markeredgecolor=SURFACE),
+    ]
+    if len(movie.truth.weeds):
+        handles += [
+            marker("weed (truth)", marker=WEED_MARKER, markersize=7, markerfacecolor="none",
+                   markeredgecolor=INK_SECONDARY),
+            marker("detection from a weed", marker=WEED_MARKER, markersize=8, color=SERIES_2,
+                   markeredgecolor=SURFACE),
+        ]
+    if movie.drops_weed_labels:
+        handles.append(marker("labelled weed: ignored", marker=WEED_MARKER, markersize=8,
+                              markerfacecolor="none", markeredgecolor=SERIES_2))
+    handles.append(marker("false return inside a track's gate", marker="o", markersize=12,
+                          markerfacecolor="none", markeredgecolor=SERIES_2,
+                          markeredgewidth=1.5))
+    if len(movie.truth.field.missing_positions):
+        handles.append(marker("empty slot (truth)", marker=EMPTY_SLOT_MARKER, markersize=7,
+                              markerfacecolor="none", markeredgecolor=SERIES_2))
+    ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, -0.06),
+              frameon=False, fontsize=8, ncols=2)
+
+
+def animate_existence_map(run: RunDir, filter_name: str, out: Path,
+                          fps: float = 4.0) -> Path:
+    """The existence map scan by scan, with what each scan's detections did, as a GIF. [B4]
+
+    One frame per scan k. Left: D(x) = sum_i r_i N(x; m_i, P_i) after scan k on a colour
+    scale fixed over the whole run - a slot brightens as its r rises and sharpens as its
+    covariance shrinks - with the true plants, weeds and empty slots, the robot's path and
+    FOV, and scan k's detections by true origin (a weed-labelled detection that the filter
+    ignores is drawn hollow, D22). Right, up to a cursor at k: detections per scan by
+    origin; the returns inside the tracks' gates that are not from their own plant - a
+    neighbour, clutter, a weed - which is how clutter and weeds reach the update; the mean
+    r of the tracks in view; and their median position std.
+
+    Reads only the run folder: works for any filter.
+
+    Args:
+        run: the run folder.
+        filter_name: which estimates log to read.
+        out: destination GIF path.
+        fps: frames (scans) per second.
+
+    Returns:
+        The path written.
+    """
+    movie = _load_existence_movie(run, filter_name)
+    fig, scene, series = _existence_movie_figure()
+    _draw_existence_frame(movie, scene, series, 0, colorbar=None)
+    colorbar = fig.colorbar(scene.images[0], ax=scene, shrink=0.6, pad=0.02)
+    colorbar.set_label("D(x) [objects per m²], square-root scale", color=INK_SECONDARY)
+    colorbar.ax.tick_params(colors=INK_SECONDARY, labelsize=8)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    writer = PillowWriter(fps=fps)
+    with writer.saving(fig, out, dpi=100):
+        for k in range(len(movie.scans)):
+            for ax in [scene, *series]:
+                ax.clear()
+            _draw_existence_frame(movie, scene, series, k, colorbar)
+            writer.grab_frame(facecolor=SURFACE)
+    return out
