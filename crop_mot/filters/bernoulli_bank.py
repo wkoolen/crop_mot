@@ -21,9 +21,9 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from crop_mot.config import FilterConfig, PruneConfig
-from crop_mot.filters.base import TrackingFilter
+from crop_mot.filters.base import BirthModel, TrackingFilter
 from crop_mot.filters.bernoulli import BernoulliFilter, BernoulliState, build_bernoulli
-from crop_mot.filters.birth import NoBirth, SingleFromMeasurement
+from crop_mot.filters.birth import NoBirth, SingleFromMeasurement, build_single_birth
 from crop_mot.types import Scan, TrackEstimate
 
 
@@ -56,7 +56,7 @@ class BernoulliBankFilter(TrackingFilter[BernoulliBankState]):
     """
 
     single: BernoulliFilter
-    births: tuple[SingleFromMeasurement, ...]
+    births: tuple[BirthModel, ...]
     r_min: float
     name: str = "bernoulli_bank"
 
@@ -133,7 +133,9 @@ def build_bernoulli_bank(cfg: FilterConfig) -> BernoulliBankFilter:
 
     The registered builder for "bernoulli_bank". Birth kind "from_measurements" seeds one
     track per entry of `birth.seeds`; "single_from_measurement" seeds one track from
-    (at_scan, detection_index), which makes a one-seed bank the single Bernoulli filter.
+    (at_scan, detection_index), which makes a one-seed bank the single Bernoulli filter;
+    "injected" places the controlled phantom of roadmap step 4a (D28), which the bank can
+    then prune.
 
     Args:
         cfg: the `filter:` block of a run config.
@@ -148,21 +150,17 @@ def build_bernoulli_bank(cfg: FilterConfig) -> BernoulliBankFilter:
     if cfg.kind != "bernoulli_bank":
         raise ValueError(f"build_bernoulli_bank got filter kind {cfg.kind!r}")
     if cfg.birth.kind == "from_measurements":
-        seeds = cfg.birth.seeds
-    elif cfg.birth.kind == "single_from_measurement":
-        seeds = ((cfg.birth.at_scan, cfg.birth.detection_index),)
+        births = tuple(
+            SingleFromMeasurement(at_scan=at_scan, detection_index=detection_index,
+                                  r_b=cfg.birth.r_b, init_cov=cfg.birth.init_cov)
+            for at_scan, detection_index in cfg.birth.seeds
+        )
     else:
-        raise ValueError(f"unknown birth kind {cfg.birth.kind!r}")
+        births = (build_single_birth(cfg.birth),)
 
     # The single filter is built by its own builder, so the bank cannot drift from it;
     # only its birth model is swapped out, and pruning stays with the bank.
     single_cfg = replace(cfg, kind="bernoulli", prune=PruneConfig(),
                          birth=replace(cfg.birth, kind="single_from_measurement", seeds=()))
     single = replace(build_bernoulli(single_cfg), birth=NoBirth())
-
-    births = tuple(
-        SingleFromMeasurement(at_scan=at_scan, detection_index=detection_index,
-                              r_b=cfg.birth.r_b, init_cov=cfg.birth.init_cov)
-        for at_scan, detection_index in seeds
-    )
     return BernoulliBankFilter(single=single, births=births, r_min=cfg.prune.r_min)

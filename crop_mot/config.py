@@ -303,10 +303,13 @@ class BirthConfig:
             detection at a chosen scan. For the B2 phantom experiment that detection is a
             clutter return, so r should then decay. "from_measurements" seeds one
             component per entry of `seeds`, for the `bernoulli_bank` filter (decision D12).
+            "injected" places one component at `position` at scan `at_scan`, with no
+            detection behind it: the controlled phantom of roadmap step 4a (D28), an
+            experiment setting rather than a model of where objects come from.
         at_scan: scan index at which to seed. For "from_measurements", the first seed's.
         detection_index: which detection of scan `at_scan` to seed from. Chosen by the
             config author (by inspecting labels.jsonl), so the birth model stays truth-blind.
-            For "from_measurements", the first seed's.
+            For "from_measurements", the first seed's; -1 for "injected", which uses none.
         r_b: birth existence probability r_b assigned to the new component. PHASE-1
             STAND-IN: a configured constant in place of the measurement-driven
             r_b = e / (e + lambda_FA c(z)), e = integral lambda_u(x) p_D(x) g(z|x) dx,
@@ -316,6 +319,8 @@ class BirthConfig:
             "from_measurements"; the pair's position in the list is the track id. Empty for
             "single_from_measurement". Chosen by the config author, e.g. with
             `python3 -m crop_mot candidates`.
+        position: shape (dim_x,), where "injected" places its component; None otherwise.
+            Configured, not read from truth, so the filter stays truth-blind.
     """
 
     kind: str
@@ -324,6 +329,7 @@ class BirthConfig:
     r_b: float
     init_cov: np.ndarray
     seeds: tuple[tuple[int, int], ...] = ()
+    position: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
@@ -769,12 +775,24 @@ def _parse_filter(raw: Any, where: str) -> FilterConfig:
         _check_keys(birth, f"{where}.birth", required={"kind", "seeds", "r_b", "init_cov"})
         seeds = _parse_seeds(birth["seeds"], f"{where}.birth.seeds")
         at_scan, detection_index = seeds[0]
+        position = None
+    elif isinstance(birth, dict) and birth.get("kind") == "injected":
+        _check_keys(birth, f"{where}.birth",
+                    required={"kind", "at_scan", "position", "r_b", "init_cov"})
+        seeds = ()
+        at_scan = _as_int(birth["at_scan"], f"{where}.birth.at_scan")
+        detection_index = -1
+        if not isinstance(birth["position"], list):
+            raise ValueError(f"{where}.birth.position: expected a list of coordinates")
+        position = np.array([_as_float(v, f"{where}.birth.position")
+                             for v in birth["position"]])
     else:
         _check_keys(birth, f"{where}.birth",
                     required={"kind", "at_scan", "detection_index", "r_b", "init_cov"})
         seeds = ()
         at_scan = _as_int(birth["at_scan"], f"{where}.birth.at_scan")
         detection_index = _as_int(birth["detection_index"], f"{where}.birth.detection_index")
+        position = None
 
     prune = raw.get("prune", {})
     _check_keys(prune, f"{where}.prune", required=set(), optional={"r_min"})
@@ -806,6 +824,7 @@ def _parse_filter(raw: Any, where: str) -> FilterConfig:
             r_b=_as_float(birth["r_b"], f"{where}.birth.r_b"),
             init_cov=_as_matrix(birth["init_cov"], f"{where}.birth.init_cov"),
             seeds=seeds,
+            position=position,
         ),
         survival=SurvivalConfig(p_S=_as_float(survival.get("p_S", 1.0),
                                               f"{where}.survival.p_S")),

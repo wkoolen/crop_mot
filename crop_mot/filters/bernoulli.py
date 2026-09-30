@@ -19,7 +19,7 @@ import numpy as np
 from crop_mot.association.gating import chi2_threshold, gate_measurements
 from crop_mot.config import FilterConfig
 from crop_mot.filters.base import BirthModel, SurvivalModel, TrackingFilter
-from crop_mot.filters.birth import SingleFromMeasurement
+from crop_mot.filters.birth import build_single_birth
 from crop_mot.filters.collapse import COLLAPSE_STRATEGIES, CollapseStrategy
 from crop_mot.filters.detection_prob import PD_EVALUATIONS, AtMean, PdEvaluation
 from crop_mot.filters.kalman import (
@@ -301,7 +301,7 @@ def build_bernoulli(cfg: FilterConfig) -> BernoulliFilter:
         raise ValueError(f"build_bernoulli got filter kind {cfg.kind!r}")
     if cfg.motion.kind != "static":
         raise ValueError(f"unknown motion kind {cfg.motion.kind!r}; phase 1 has only 'static'")
-    if cfg.birth.kind != "single_from_measurement":
+    if cfg.birth.kind not in ("single_from_measurement", "injected"):
         raise ValueError(f"unknown birth kind {cfg.birth.kind!r}")
     if cfg.prune.r_min > 0.0:
         raise ValueError("filter.prune is implemented by 'bernoulli_bank', not 'bernoulli'")
@@ -318,9 +318,7 @@ def build_bernoulli(cfg: FilterConfig) -> BernoulliFilter:
         motion=StaticTarget(q=cfg.motion.q, dim_x=measurement.dim_x),
         measurement=measurement,
         sensor=build_sensor_model(assumed.fov, assumed.detection, assumed.lambda_FA, measurement),
-        birth=SingleFromMeasurement(at_scan=cfg.birth.at_scan,
-                                    detection_index=cfg.birth.detection_index,
-                                    r_b=cfg.birth.r_b, init_cov=cfg.birth.init_cov),
+        birth=build_single_birth(cfg.birth),
         survival=SurvivalModel(p_S=cfg.survival.p_S),
         collapse=COLLAPSE_STRATEGIES[cfg.collapse](),
         gate_chi2=chi2_threshold(cfg.gate.chi2_prob, measurement.dim_z),

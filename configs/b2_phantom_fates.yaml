@@ -1,0 +1,45 @@
+# B3 / roadmap step 4a: the controlled phantom, repeated over seeds (decisions D17, D28).
+#
+# One hypothesis is placed at the same empty spot at the same scan in every seed - D8's
+# phantom position, about 1.17 m from the nearest plant - and only the random scene around
+# it changes: plant jitter, clutter, misses and the weeds. What happens to it in each seed
+# (pruned, confirmed on a plant, confirmed on a weed, sustained by clutter, or still alive
+# and unconfirmed) is that seed's one outcome; `analyse --plots phantom_fates` reports the
+# proportions with Wilson intervals, split by whether a weed return ever fell in its gate.
+#
+# The field with weeds, so that stratum is not empty. The bank filter, so the phantom can
+# be pruned (the single Bernoulli filter never deletes, D13).
+
+name: b2_phantom_fates
+seed: 42
+
+scenario: configs/b1_two_rows_weeds.yaml
+
+filter:
+  kind: bernoulli_bank
+  motion: {kind: static, q: 0.0}
+  measurement:
+    kind: linear_xy
+    R: [[0.04, 0.0],
+        [0.0, 0.04]]
+  assumed_sensor:
+    fov: {min_range: 0.3, max_range: 4.0, half_angle: 0.6}
+    detection: {kind: constant, p_D: 0.85}
+    lambda_FA: 2.0
+  birth:
+    # An experiment setting, not a birth model: no detection is behind it (D28).
+    kind: injected
+    at_scan: 24
+    position: [1.94, 4.82]
+    r_b: 0.08
+    init_cov: [[0.12, 0.0],
+               [0.0, 0.12]]
+  survival: {p_S: 1.0}
+  gate: {chi2_prob: 0.99}
+  collapse: best_branch
+  prune: {r_min: 1.0e-3}
+
+analysis:
+  b3_reference: bernoulli_existence
+  monte_carlo: {n_runs: 200}   # as D15's weed study; one outcome per seed
+  plots: [scene, hypotheses, r_vs_analytic]
