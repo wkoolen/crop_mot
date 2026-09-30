@@ -387,6 +387,9 @@ class FilterConfig:
             Gaussian; a key into `crop_mot.filters.collapse.COLLAPSE_STRATEGIES`. Optional in
             the YAML, default "best_branch".
         prune: component deletion. Optional in the YAML, default off (r_min = 0).
+        p_D_evaluation: how p_D is evaluated for a Gaussian track; a key into
+            `crop_mot.filters.detection_prob.PD_EVALUATIONS`. Optional in the YAML, default
+            "at_mean" (roadmap step 3b, decision D27).
     """
 
     kind: str
@@ -398,6 +401,7 @@ class FilterConfig:
     gate: GateConfig
     collapse: str = "best_branch"
     prune: PruneConfig = PruneConfig()
+    p_D_evaluation: str = "at_mean"
 
 
 # --------------------------------------------------------------------------------------
@@ -751,7 +755,7 @@ def _parse_filter(raw: Any, where: str) -> FilterConfig:
     _check_keys(raw, where,
                 required={"kind", "motion", "measurement", "assumed_sensor", "birth",
                           "survival", "gate"},
-                optional={"collapse", "prune"})
+                optional={"collapse", "prune", "p_D_evaluation"})
 
     motion = raw["motion"]
     _check_keys(motion, f"{where}.motion", required={"kind"}, optional={"q"})
@@ -809,6 +813,8 @@ def _parse_filter(raw: Any, where: str) -> FilterConfig:
                                             f"{where}.gate.chi2_prob")),
         collapse=_as_str(raw.get("collapse", "best_branch"), f"{where}.collapse"),
         prune=PruneConfig(r_min=r_min),
+        p_D_evaluation=_as_str(raw.get("p_D_evaluation", "at_mean"),
+                               f"{where}.p_D_evaluation"),
     )
 
 

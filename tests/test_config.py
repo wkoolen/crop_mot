@@ -75,3 +75,15 @@ def test_inconsistent_multiplicity_is_an_error(tmp_path) -> None:
         bad.write_text(bad_text, encoding="utf-8")
         with pytest.raises(ValueError, match=match):
             load_scenario_config(bad)
+
+
+def test_p_D_evaluation_key_is_optional(tmp_path) -> None:
+    """`filter.p_D_evaluation` defaults to at_mean and parses when given (roadmap step 3b)."""
+    text = (CONFIGS / "b2_bernoulli_phantom.yaml").read_text(encoding="utf-8")
+    assert load_run_config(CONFIGS / "b2_bernoulli_phantom.yaml").filter_cfg.p_D_evaluation \
+        == "at_mean"
+    given = tmp_path / "given.yaml"
+    given.write_text(text.replace("  collapse: best_branch\n",
+                                  "  collapse: best_branch\n  p_D_evaluation: expected\n"),
+                     encoding="utf-8")
+    assert load_run_config(given).filter_cfg.p_D_evaluation == "expected"

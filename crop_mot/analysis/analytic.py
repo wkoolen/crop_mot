@@ -40,7 +40,8 @@ class ScanEvent:
             "p_D == 0" as a matter of bookkeeping: a target out of view is not a
             misdetection, and conflating the two is the most likely way for the closed form
             and the filter to disagree.
-        p_D: the filter's assumed detection probability at this scan.
+        p_D: the detection probability the filter used in the miss weight at this scan,
+            from its configured p_D evaluation (the plug-in p_D(m) by default, D27).
         lambda_FA: the filter's assumed clutter rate at this scan.
         n_gated: how many detections fell inside the gate.
         n_clutter_gated: how many of those were clutter, from labels.jsonl. Evaluation-side

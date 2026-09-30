@@ -22,6 +22,7 @@ from crop_mot.analysis.analytic import ScanEvent
 from crop_mot.analysis.estimates_log import ScanEstimates
 from crop_mot.association.gating import chi2_threshold, gate_measurements
 from crop_mot.config import FilterConfig
+from crop_mot.filters.detection_prob import PD_EVALUATIONS
 from crop_mot.filters.kalman import kf_predict, log_predicted_likelihood, predicted_measurement
 from crop_mot.motion.models import StaticTarget
 from crop_mot.sensor.fov import in_fov
@@ -46,6 +47,9 @@ def build_scan_events(
       * record whether that location was inside the assumed FOV;
       * count how many detections fell inside the gate, and - from labels.jsonl, which only
         this side of the pipeline may read - how many of those were clutter;
+      * p_D as the filter's configured p_D evaluation gives it (roadmap step 3b, D27), so
+        the event carries the value the filter used and B3 keeps testing the combination
+        formula, not the p_D approximation;
       * for each gated detection z_i, the likelihood ratio
         ell_i / kappa_i = p_D N(z_i; z_hat, S) / (lambda_FA c(z_i)), with z_hat and S from
         the shared `predicted_measurement` and N from `log_predicted_likelihood`, so the
@@ -103,6 +107,7 @@ def build_scan_events(
     measurement = build_measurement_model(cfg.measurement)
     assumed = cfg.assumed_sensor
     sensor = build_sensor_model(assumed.fov, assumed.detection, assumed.lambda_FA, measurement)
+    p_D_evaluation = PD_EVALUATIONS[cfg.p_D_evaluation]()
 
     events = []
     for scan, scan_labels, moments in zip(scans, labels, track_moments_per_scan):
@@ -118,13 +123,14 @@ def build_scan_events(
             continue
 
         mean, cov = moments
-        p_D = sensor.p_D(mean, scan.pose)
+        p_D = p_D_evaluation.miss_p_D(sensor, mean, cov, scan.pose)
         z_hat, S = predicted_measurement(mean, cov, measurement, scan.pose)
         gated = gated_detection_indices(scan, mean, cov, cfg)
         ratios = []
         for i in gated:
             z = scan.detections[i].z
-            ell = p_D * np.exp(log_predicted_likelihood(z, z_hat, S))
+            ell = (p_D_evaluation.detection_p_D(sensor, mean, cov, scan.pose, z)
+                   * np.exp(log_predicted_likelihood(z, z_hat, S)))
             kappa = lambda_FA * sensor.clutter_density(z, scan.pose)
             if ell == 0.0:
                 ratios.append(0.0)

@@ -21,6 +21,7 @@ from crop_mot.config import FilterConfig
 from crop_mot.filters.base import BirthModel, SurvivalModel, TrackingFilter
 from crop_mot.filters.birth import SingleFromMeasurement
 from crop_mot.filters.collapse import COLLAPSE_STRATEGIES, CollapseStrategy
+from crop_mot.filters.detection_prob import PD_EVALUATIONS, AtMean, PdEvaluation
 from crop_mot.filters.kalman import (
     kf_predict,
     kf_update,
@@ -76,6 +77,8 @@ class BernoulliFilter(TrackingFilter[BernoulliState]):
             again (see crop_mot.filters.collapse). Does not affect r at the current scan.
         gate_chi2: squared-Mahalanobis gate threshold, precomputed from the configured gate
             probability and dim_z.
+        p_D_evaluation: how p_D enters the miss weight, the detection branches and the
+            missed-branch moments (see crop_mot.filters.detection_prob); AtMean by default.
         name: "bernoulli".
     """
 
@@ -86,6 +89,7 @@ class BernoulliFilter(TrackingFilter[BernoulliState]):
     survival: SurvivalModel
     collapse: CollapseStrategy
     gate_chi2: float
+    p_D_evaluation: PdEvaluation = AtMean()
     name: str = "bernoulli"
 
     def initial_state(self) -> BernoulliState:
@@ -203,8 +207,9 @@ class BernoulliFilter(TrackingFilter[BernoulliState]):
         r, m, P = state.r, state.mean, state.cov
         pose = scan.pose
 
-        # Plug-in for p_D_bar [A2 §2.1]; exactly 0 outside the assumed FOV.
-        p_D = self.sensor.p_D(m, pose)
+        # The p_D of the miss weight, standing in for p_D_bar [A2 §2.1]; with the default
+        # AtMean the plug-in p_D(m), exactly 0 outside the assumed FOV (decision D27).
+        p_D = self.p_D_evaluation.miss_p_D(self.sensor, m, P, pose)
         lambda_FA = self.sensor.lambda_FA(pose)
 
         z_hat, S = predicted_measurement(m, P, self.measurement, pose)
@@ -214,7 +219,8 @@ class BernoulliFilter(TrackingFilter[BernoulliState]):
         # Clutter intensity lambda_FA * c(z) at each gated detection [A0 §Measurement model].
         kappa = [lambda_FA * self.sensor.clutter_density(Z[i], pose) for i in gated]
         # ell_i = p_D * N(z_i; z_hat, S): "this component produced z_i" [A2 §3.1].
-        ell = [p_D * np.exp(log_predicted_likelihood(Z[i], z_hat, S)) for i in gated]
+        ell = [self.p_D_evaluation.detection_p_D(self.sensor, m, P, pose, Z[i])
+               * np.exp(log_predicted_likelihood(Z[i], z_hat, S)) for i in gated]
 
         prod_kappa = float(np.prod(kappa))  # 1.0 when nothing is gated
         w_absent = (1.0 - r) * prod_kappa
@@ -239,7 +245,8 @@ class BernoulliFilter(TrackingFilter[BernoulliState]):
                                   track_id=state.track_id)
 
         # Branch densities given existence, weights normalised [A3 §Normalizing the mixture].
-        branches = [(w_missed / w_exists, m, P)]
+        m_missed, P_missed = self.p_D_evaluation.missed_moments(self.sensor, m, P, pose)
+        branches = [(w_missed / w_exists, m_missed, P_missed)]
         for i, w in zip(gated, w_detected):
             m_i, P_i = kf_update(m, P, Z[i], self.measurement, pose)
             branches.append((w / w_exists, m_i, P_i))
@@ -288,6 +295,7 @@ def build_bernoulli(cfg: FilterConfig) -> BernoulliFilter:
         ValueError: if cfg.kind is not "bernoulli", or a referenced model kind is unknown,
             or pruning is configured (it lives in the bank filter; a single Bernoulli would
             have nothing to report after deleting its one component).
+        NotImplementedError: if the p_D evaluation is one of the stubbed options B to D.
     """
     if cfg.kind != "bernoulli":
         raise ValueError(f"build_bernoulli got filter kind {cfg.kind!r}")
@@ -300,6 +308,9 @@ def build_bernoulli(cfg: FilterConfig) -> BernoulliFilter:
     if cfg.collapse not in COLLAPSE_STRATEGIES:
         raise ValueError(f"unknown collapse {cfg.collapse!r}; "
                          f"available: {sorted(COLLAPSE_STRATEGIES)}")
+    if cfg.p_D_evaluation not in PD_EVALUATIONS:
+        raise ValueError(f"unknown p_D_evaluation {cfg.p_D_evaluation!r}; "
+                         f"available: {sorted(PD_EVALUATIONS)}")
 
     measurement = build_measurement_model(cfg.measurement)
     assumed = cfg.assumed_sensor
@@ -313,4 +324,5 @@ def build_bernoulli(cfg: FilterConfig) -> BernoulliFilter:
         survival=SurvivalModel(p_S=cfg.survival.p_S),
         collapse=COLLAPSE_STRATEGIES[cfg.collapse](),
         gate_chi2=chi2_threshold(cfg.gate.chi2_prob, measurement.dim_z),
+        p_D_evaluation=PD_EVALUATIONS[cfg.p_D_evaluation](),
     )
