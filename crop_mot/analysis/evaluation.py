@@ -315,3 +315,83 @@ def gate_contents(run: RunDir, filter_name: str) -> GateContents:
     return GateContents(own=means["own"], neighbour=means["neighbour"],
                         clutter=means["clutter"], weed=means["weed"], pulled=means["pulled"],
                         n_tracks=n_tracks, shares=shares)
+
+
+@dataclass(frozen=True)
+class MissingPlants:
+    """How well a filter's r finds the empty slots of the plan (roadmap step 8c, D23). [B4]
+
+    Every slot of the field - a planted plant, or an empty slot at its nominal position
+    (truth) - gets a score per scan: the largest r among the reported tracks whose mean
+    is nearer to it than to any other slot and within D_MATCH (D28); 0 when no track is
+    there. A low score says "nothing here". Scored from positions, not track ids, so a
+    method with births (N unknown) is scored the same way.
+
+    Attributes:
+        slot_ids: the slots, increasing.
+        empty: shape (n_slots,), whether each slot is truly empty.
+        scores: shape (K, n_slots), the score per scan.
+        seen: shape (K, n_slots), whether the slot has been in view at least once up to
+            and including the scan.
+        n_scans_in_view: shape (n_slots,), how many scans each slot was in view in all.
+    """
+
+    slot_ids: np.ndarray
+    empty: np.ndarray
+    scores: np.ndarray
+    seen: np.ndarray
+    n_scans_in_view: np.ndarray
+
+    def rates(self, threshold: float = R_CONF) -> tuple[float, float]:
+        """At the last scan, over seen slots: (empty slots with score < threshold, as a
+        share of seen empty slots; planted slots with score < threshold, as a share of
+        seen planted slots). NaN where a group is empty."""
+        seen, low = self.seen[-1], self.scores[-1] < threshold
+        empty, planted = seen & self.empty, seen & ~self.empty
+        found = low[empty].mean() if empty.any() else float("nan")
+        flagged = low[planted].mean() if planted.any() else float("nan")
+        return float(found), float(flagged)
+
+    def decision_scans(self, threshold: float = R_CONF) -> list[int | None]:
+        """Per seen empty slot: in-view scans until its score falls below the threshold
+        and stays there to the end, or None if it never does."""
+        result = []
+        for j in np.flatnonzero(self.empty & self.seen[-1]):
+            low = self.scores[:, j] < threshold
+            if not low[-1]:
+                result.append(None)
+                continue
+            last_high = np.flatnonzero(~low)
+            k_decided = int(last_high[-1]) + 1 if len(last_high) else 0
+            first_seen = int(np.flatnonzero(self.seen[:, j])[0])
+            result.append(max(0, k_decided - first_seen))
+        return result
+
+
+def missing_plants(run: RunDir, filter_name: str) -> MissingPlants | None:
+    """Slot scores for finding the empty slots; None when the field has none. [B4, 8c]"""
+    cfg = load_run_config(run.config)
+    truth = read_truth(run.truth)
+    if not len(truth.field.missing_ids):
+        return None
+    records = read_estimates(run.estimates(filter_name))
+    fov = cfg.scenario.sensor.fov
+    slot_ids = np.concatenate([truth.field.ids, truth.field.missing_ids])
+    positions = np.vstack([truth.field.positions, truth.field.missing_positions])
+    order = np.argsort(slot_ids)
+    slot_ids, positions = slot_ids[order], positions[order]
+    empty = np.isin(slot_ids, truth.field.missing_ids)
+
+    n_scans, n_slots = len(records), len(slot_ids)
+    scores = np.zeros((n_scans, n_slots))
+    in_view = np.zeros((n_scans, n_slots), dtype=bool)
+    for k, (record, sample) in enumerate(zip(records, truth.poses)):
+        in_view[k] = [in_fov(p, sample.true, fov) for p in positions]
+        for track in record.estimates:
+            distances = np.linalg.norm(positions - track.mean[:2], axis=1)
+            j = int(np.argmin(distances))
+            if distances[j] <= D_MATCH:
+                scores[k, j] = max(scores[k, j], track.r)
+    return MissingPlants(slot_ids=slot_ids, empty=empty, scores=scores,
+                         seen=np.logical_or.accumulate(in_view, axis=0),
+                         n_scans_in_view=in_view.sum(axis=0))

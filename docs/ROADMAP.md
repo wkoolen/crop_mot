@@ -662,7 +662,8 @@ everything as documented and build complexity brick by brick"); 7 to 12 stay ope
 their steps.
 7. ~~The detection `label` field, the confusion matrix config~~ (decided, D22), and the
    derivation for the imperfect classifier (step 8b): still open, the author's.
-8. The prior r_0 per slot, and how the simulator places missing plants (step 8c).
+8. ~~The prior r_0 per slot, and how the simulator places missing plants (step 8c).~~
+   Decided: r_0 = 1 - p_missing = 0.9, independent per slot (D23).
 9. A constant yaw-bias slot in `world/path.py` (step 8d).
 10. The output rule for MHT and PMBM: best global hypothesis or marginal (§2, step 16).
 11. Whether PMBM is needed (step 16).
@@ -700,7 +701,7 @@ the commit of the step named; the number is reserved so parallel sessions do not
 | 7 | done | 2026-09-30: `tests/test_figure_contract.py` renders every `ANY_FILTER_PLOTS` figure for every `FILTERS` entry (2 x 6 today), parametrised over both (D38). The "not applicable" panel comes with the first filter that needs it; the B2/B3 figures are Bernoulli-specific and outside the contract; the association figure stays deferred (D30) |
 | 8a | done | 2026-09-30: `filter.plan` + `birth: null` start the bank from the plan's N slots at r = 1 (D39); configs `b4_known_n_bank{,_weeds}.yaml`; failure modes from the labels via `gate_contents` (D40). Seed 42: 70 slots, mean GOSPA 0.24 m, NEES in band 98 % of scans, 24 ms per scan; a neighbour's detection in 91 % of gates, clutter 19 %, weeds 9 % (weeds config), no plant pulled - a 3.6 cm prior moves a slot about 1 cm per wrong association. Scaling with the plan (row length 6-48 m): 13-88 ms median per scan, slope 0.92 against N (D36): cost grows with total N, so the p_D = 0 skip of 4c is worth testing. Not yet: the known-N NEES rule (track i against plant i) and multi-seed shares |
 | 8b | done | 2026-09-30: `Detection.label` from a confusion matrix (`sensor.classifier`, default perfect, own RNG stream: truth and z unchanged); `filter.assumed_classifier` (perfect only) drops weed-labelled detections from plant gates; config `b4_known_n_bank_labels.yaml` (D22). Seed 42: weed returns in gates 9.2 % -> 0 %, GOSPA 0.249 -> 0.244 m. The imperfect classifier waits on the label-factor derivation (open question 7) |
-| 8c | not started | expected to show the bank's failure on empty slots |
+| 8c | done | 2026-09-30: `world.p_missing` (independent per slot, own stream) and `plan.r_0`; configs `b1_two_rows_missing.yaml`, `b4_bounded_n_bank.yaml` (r_0 = 0.9); every slot checked against A2 (`r_initial`); `missing_plants` metric and figure, with the first "not applicable" panel (D23). Seed 42: the bank finds 0 of 4 seen empty slots, each at r = 1.0, as expected - the neighbours' detections multiply an empty slot's odds by about 7 per scan. Step 12 (JIPDA) is what should fix it. Later bricks: runs of neighbouring gaps, several seeds |
 | 8d | not started | stub only; waits on NEES (step 5) for the body |
 | 9 | not started | table structure fixed in step 9 |
 | 10 | not started | waits on the A2 §3.1 `TODO(Wessel)` |

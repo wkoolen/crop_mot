@@ -25,6 +25,7 @@ from matplotlib.image import imread
 from crop_mot.analysis.evaluation import (
     gate_contents,
     gospa_series,
+    missing_plants,
     nees,
     nees_band,
     scan_views,
@@ -44,7 +45,9 @@ def filter_summary(run: RunDir, filter_name: str) -> dict[str, float]:
         "mean_gospa" in metres; "nees_in_band", the share of scans with at least one NEES
         pair whose average lies inside its 95 % band (NaN when there are none);
         "median_update_s" over scans 1.. of the timing log; "pulled_share", the share of
-        in-view track-scans nearer another plant than their own (`gate_contents`).
+        in-view track-scans nearer another plant than their own (`gate_contents`);
+        with missing plants, "empty_found" and "plants_flagged" at r_conf (step 8c), NaN
+        otherwise.
     """
     views = scan_views(run, filter_name)
     results = gospa_series(views)
@@ -53,12 +56,16 @@ def filter_summary(run: RunDir, filter_name: str) -> dict[str, float]:
     paired = error.n_pairs > 0
     inside = (error.mean_nees >= lower) & (error.mean_nees <= upper)
     timing = list(read_jsonl(run.timing(filter_name)))
-    return {
+    row = {
         "mean_gospa": float(np.mean([result.distance for result in results])),
         "nees_in_band": float(inside[paired].mean()) if paired.any() else float("nan"),
         "median_update_s": float(np.median([row["update_s"] for row in timing[1:]])),
         "pulled_share": gate_contents(run, filter_name).shares["pulled_share"],
     }
+    missing = missing_plants(run, filter_name)
+    found, flagged = missing.rates() if missing is not None else (float("nan"),) * 2
+    row["empty_found"], row["plants_flagged"] = found, flagged
+    return row
 
 
 def compare_run(run: RunDir, filter_names: Sequence[str],

@@ -38,6 +38,7 @@ from crop_mot.analysis.evaluation import (
     existence_density,
     gate_contents,
     gospa_series,
+    missing_plants,
     nees,
     nees_band,
     scan_views,
@@ -563,6 +564,83 @@ def plot_gate_contents(run: RunDir, filter_name: str, out: Path) -> Path:
     ax_pulled.set_ylabel("share pulled")
     ax_pulled.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), frameon=False, fontsize=9)
     _time_axis(ax_pulled, len(k))
+    return _save(fig, out)
+
+
+def _not_applicable(out: Path, title: str, reason: str) -> Path:
+    """A labelled placeholder panel: the figure does not apply to this run (§2 rule 1).
+
+    Roadmap §2 rule 1: a figure may declare a filter or a run "not applicable"; it then
+    renders this panel, which the figure contract test accepts, instead of raising.
+    """
+    fig, (ax,) = _new_figure(height=2.4)
+    ax.set_axis_off()
+    ax.text(0.5, 0.5, f"not applicable: {reason}", ha="center", va="center",
+            color=INK_SECONDARY, fontsize=11, transform=ax.transAxes)
+    ax.set_title(title, color=INK, fontsize=11)
+    return _save(fig, out)
+
+
+def plot_missing_plants(run: RunDir, filter_name: str, out: Path) -> Path:
+    """Finding the plan's empty slots from r: over time, and over the threshold. [B4, 8c]
+
+    Left: every seen slot's score over time (the r of the track on it, 0 without one) -
+    planted slots thin, empty slots bold - with the confirmation threshold r_conf. Right,
+    at the last scan over the slots seen: the share of empty slots found (score below a
+    threshold) against the share of planted slots wrongly flagged, as the threshold goes
+    from 0 to 1, with r_conf marked. "Not applicable" for a field without missing plants.
+
+    Args:
+        run: the run folder.
+        filter_name: which estimates log to read.
+        out: destination PNG path.
+
+    Returns:
+        The path written.
+    """
+    title = f"Finding missing plants, {filter_name}"
+    result = missing_plants(run, filter_name)
+    if result is None:
+        return _not_applicable(out, title, "the field has no missing plants (p_missing = 0)")
+
+    found, flagged = result.rates()
+    fig = Figure(figsize=(9.0, 3.8), facecolor=SURFACE, layout="constrained")
+    ax, ax_rates = fig.subplots(1, 2, gridspec_kw={"width_ratios": [1.6, 1.0]})
+    for axis in (ax, ax_rates):
+        _style_axes(axis)
+    k = np.arange(result.scores.shape[0])
+    seen = result.seen[-1]
+    for j in np.flatnonzero(seen & ~result.empty):
+        ax.plot(k, result.scores[:, j], color=SERIES_1, linewidth=1.0, alpha=0.35)
+    for j in np.flatnonzero(seen & result.empty):
+        ax.plot(k, result.scores[:, j], color=SERIES_2, linewidth=2.2)
+    ax.axhline(R_CONF, color=INK_SECONDARY, linewidth=1.0)
+    ax.set_ylim(-0.02, 1.02)
+    ax.set_xlim(k[0] - 0.5, k[-1] + 0.5)
+    ax.set_xlabel("scan k")
+    ax.set_ylabel("r of the track on the slot")
+    ax.legend(handles=[
+        Line2D([], [], color=SERIES_1, linewidth=1.0, alpha=0.6,
+               label=f"planted slot ({int((seen & ~result.empty).sum())} seen)"),
+        Line2D([], [], color=SERIES_2, linewidth=2.2,
+               label=f"empty slot ({int((seen & result.empty).sum())} seen)"),
+        Line2D([], [], color=INK_SECONDARY, linewidth=1.0, label=f"r_conf = {R_CONF:g}"),
+    ], loc="lower left", frameon=False, fontsize=8)
+
+    thresholds = np.concatenate([[0.0], np.unique(result.scores[-1]), [1.0 + 1e-9]])
+    curve = np.array([result.rates(t) for t in thresholds])
+    ax_rates.plot(curve[:, 1], curve[:, 0], color=SERIES_2, linewidth=2.0,
+                  drawstyle="steps-post")
+    ax_rates.plot(flagged, found, marker="o", markersize=8, color=SERIES_2,
+                  markeredgecolor=SURFACE, linestyle="none")
+    ax_rates.annotate(f"r_conf = {R_CONF:g}", (flagged, found), xytext=(8, 6),
+                      textcoords="offset points", color=INK_SECONDARY, fontsize=8)
+    ax_rates.set_xlim(-0.02, 1.02)
+    ax_rates.set_ylim(-0.02, 1.02)
+    ax_rates.set_xlabel("planted slots flagged empty")
+    ax_rates.set_ylabel("empty slots found")
+    fig.suptitle(f"{title}: {found:.0%} of empty slots found, {flagged:.0%} of plants "
+                 f"flagged (last scan, r < {R_CONF:g})", color=INK, fontsize=11)
     return _save(fig, out)
 
 

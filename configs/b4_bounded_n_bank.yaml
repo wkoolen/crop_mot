@@ -40,4 +40,4 @@ filter:
 analysis:
   b3_reference: null
   monte_carlo: null
-  plots: [scene, tracks, existence_map, cardinality, gospa, nees, gate_contents]
+  plots: [scene, tracks, existence_map, cardinality, gospa, nees, gate_contents, missing_plants]

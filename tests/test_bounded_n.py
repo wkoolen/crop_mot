@@ -117,3 +117,46 @@ def test_the_shipped_bounded_config() -> None:
     assert cfg.filter_cfg.plan.r_0 == pytest.approx(1.0 - cfg.scenario.world.p_missing)
     assert cfg.filter_cfg.plan.rows == cfg.scenario.world.rows
     assert cfg.filter_cfg.birth is None
+
+
+def test_missing_plant_rates_and_decisions_by_hand() -> None:
+    """Two empty slots (one found at scan 2, one never) and two plants (one flagged)."""
+    from crop_mot.analysis.evaluation import MissingPlants
+
+    scores = np.array([[0.9, 0.9, 0.9, 0.9],
+                       [0.9, 0.6, 0.9, 0.95],
+                       [0.9, 0.3, 0.9, 0.4],
+                       [0.9, 0.2, 0.99, 0.3]])
+    seen = np.ones_like(scores, dtype=bool)
+    seen[0] = [True, False, True, True]
+    result = MissingPlants(slot_ids=np.arange(4), empty=np.array([False, True, True, False]),
+                           scores=scores, seen=seen, n_scans_in_view=np.array([4, 3, 4, 4]))
+    assert result.rates(0.5) == (0.5, 0.5)
+    assert result.rates(1.0) == (1.0, 1.0)
+    assert result.decision_scans(0.5) == [1, None]
+
+
+def test_the_bank_does_not_find_the_empty_slots(tmp_path) -> None:
+    """The expected failure of step 8c on the shipped config's own seed (D23).
+
+    Each empty slot sits 0.35 m from two plants whose detections fall in its gate every
+    scan; under the bank's independence approximation they raise its r to 1.
+    """
+    import os
+
+    from crop_mot.analysis.evaluation import missing_plants
+    from crop_mot.runner.track import track_from_config
+
+    from conftest import REPO_ROOT
+
+    cwd = os.getcwd()
+    os.chdir(REPO_ROOT)  # the config's scenario path is relative to the repo root
+    try:
+        run = track_from_config(CONFIGS / "b4_bounded_n_bank.yaml", tmp_path)
+    finally:
+        os.chdir(cwd)
+    result = missing_plants(run, "bernoulli_bank")
+    empty_seen = result.empty & result.seen[-1]
+    assert empty_seen.sum() >= 3
+    assert result.rates() == (0.0, 0.0)
+    assert np.all(result.scores[-1, empty_seen] > 0.999)

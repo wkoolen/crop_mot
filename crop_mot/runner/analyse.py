@@ -34,6 +34,7 @@ from crop_mot.analysis.plots import (
     plot_gospa,
     plot_hypotheses,
     plot_lifetimes,
+    plot_missing_plants,
     plot_nees,
     plot_phantom_fates,
     plot_r_montecarlo,
@@ -49,7 +50,7 @@ from crop_mot.runner.run_dir import RunDir
 # Every plot `analyse` knows how to draw, as named in the config's `analysis.plots`.
 PLOT_NAMES = ("scene", "counts", "r_vs_k", "hypotheses", "hypotheses_anim", "r_vs_analytic",
               "r_montecarlo", "phantom_fates", "tracks", "existence_map", "cardinality",
-              "gospa", "nees", "lifetimes", "gate_contents")
+              "gospa", "nees", "lifetimes", "gate_contents", "missing_plants")
 # The step-5 figures that work for any filter: each reads only (run, filter_name).
 ANY_FILTER_PLOTS = {
     "tracks": plot_tracks,
@@ -59,6 +60,7 @@ ANY_FILTER_PLOTS = {
     "nees": plot_nees,
     "lifetimes": plot_lifetimes,
     "gate_contents": plot_gate_contents,
+    "missing_plants": plot_missing_plants,
 }
 # The ones a simulate-only run folder (no filter, no estimates) can draw.
 SCENARIO_PLOTS = ("scene", "counts")
