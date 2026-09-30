@@ -15,6 +15,7 @@ Subcommands:
     candidates --run runs/<stamp>_... --min-distance 1.0 [B2] phantom seeds for the bank
     scaling   --config ... --sweep lambda_FA --values 1 2 4 8  [B4] time per scan
     compare   --run runs/<stamp>_... --filters bernoulli bernoulli_bank  [B4] side by side
+    yaw       --config configs/b4_yaw_sensitivity.yaml     [B4] NEES against a heading error
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from crop_mot.runner.analyse import analyse_run
 from crop_mot.runner.compare import compare_run
 from crop_mot.runner.run_dir import RunDir
 from crop_mot.runner.scaling import scaling_from_config
+from crop_mot.runner.yaw_sensitivity import yaw_from_config
 from crop_mot.runner.simulate import simulate_from_config
 from crop_mot.runner.track import track_from_config
 
@@ -79,6 +81,12 @@ def build_parser() -> argparse.ArgumentParser:
     compare.add_argument("--plots", nargs="+", default=None,
                          help="figures to compare; default: every figure for any filter")
 
+    yaw = commands.add_parser(
+        "yaw", help="[B4] NEES and GOSPA against a heading error (roadmap step 8d)")
+    yaw.add_argument("--config", type=Path, required=True, help="yaw experiment YAML")
+    yaw.add_argument("--runs", type=Path, default=Path("runs"),
+                     help="directory holding run folders (default: runs)")
+
     scaling = commands.add_parser(
         "scaling", help="[B4] update time per scan against problem size (roadmap 4c)")
     scaling.add_argument("--config", type=Path, required=True, help="run YAML to sweep")
@@ -111,6 +119,8 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "compare":
             run = RunDir(args.run)
             compare_run(run, args.filters, args.plots)
+        elif args.command == "yaw":
+            run = yaw_from_config(args.config, args.runs)
         elif args.command == "scaling":
             run = scaling_from_config(args.config, args.sweep, args.values, args.seeds,
                                       args.runs)

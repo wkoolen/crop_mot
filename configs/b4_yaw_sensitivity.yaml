@@ -1,0 +1,16 @@
+# Roadmap step 8d: what a heading error does to the known-N map (decisions D16, D41).
+#
+# The robot's pose is reported with a constant yaw bias b (and a heading wobble), while the
+# filter keeps assuming the reported pose is the true pose. RTK gives the position to about
+# a centimetre, but heading comes from another sensor: one degree of error moves a
+# detection 4 m away by about 7 cm, and it moves every detection of a scan the same way,
+# so it does not average out. With the 3.6 cm prior of the map the posterior is already
+# tighter than that, so NEES should leave its band below one degree.
+#
+#   python3 -m crop_mot yaw --config configs/b4_yaw_sensitivity.yaml
+
+name: b4_yaw_sensitivity
+run: configs/b4_known_n_bank.yaml   # the filter to test; its pose_known is overridden
+yaw_bias_deg: [0.0, 0.25, 0.5, 1.0, 2.0]
+yaw_wobble_std_deg: [0.0, 1.0]      # 1 degree is about the path's configured wobble
+seeds: 3

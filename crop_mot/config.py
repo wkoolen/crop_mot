@@ -145,6 +145,10 @@ class PathConfig:
             EXTENSION SLOT: setting it False models gait-induced odometry error.
         yaw_wobble_std: radians, heading noise. Ignored while pose_known is True.
         xy_noise_std: metres, position noise. Ignored while pose_known is True.
+        yaw_bias: radians, a constant heading error of the reported pose (roadmap step
+            8d, decision D41): the correlated error RTK does not remove, since heading
+            comes from another sensor. Ignored while pose_known is True. Optional in the
+            YAML, default 0.
     """
 
     kind: str
@@ -157,6 +161,7 @@ class PathConfig:
     pose_known: bool
     yaw_wobble_std: float
     xy_noise_std: float
+    yaw_bias: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -570,6 +575,31 @@ class RunConfig:
     analysis: AnalysisConfig
 
 
+@dataclass(frozen=True)
+class YawSensitivityConfig:
+    """The heading-error experiment of roadmap step 8d (decisions D16, D41). [B4]
+
+    The simulator reports the pose with a constant yaw bias (and optionally a heading
+    wobble) while the filter keeps assuming the reported pose is the true pose; the
+    experiment measures what that does to NEES and GOSPA. With RTK the position is good
+    to about a centimetre, but heading comes from another sensor, and a heading bias moves
+    every detection of a scan the same way, so it does not average out (D16).
+
+    Attributes:
+        name: used in the result folder's name.
+        run: the run configuration to perturb, loaded from the `run:` path.
+        yaw_bias_deg: the constant yaw biases to sweep, in degrees.
+        yaw_wobble_std_deg: the heading-wobble standard deviations to sweep, in degrees.
+        seeds: seeds per combination (one outcome per seed, D17).
+    """
+
+    name: str
+    run: RunConfig
+    yaw_bias_deg: tuple[float, ...]
+    yaw_wobble_std_deg: tuple[float, ...]
+    seeds: int
+
+
 # --------------------------------------------------------------------------------------
 # Loading
 # --------------------------------------------------------------------------------------
@@ -787,7 +817,7 @@ def _parse_world(raw: Any, where: str) -> WorldConfig:
 def _parse_path(raw: Any, where: str) -> PathConfig:
     keys = {"kind", "x", "y_start", "heading", "speed", "n_scans", "scan_period",
             "pose_known", "yaw_wobble_std", "xy_noise_std"}
-    _check_keys(raw, where, required=keys)
+    _check_keys(raw, where, required=keys, optional={"yaw_bias"})
     return PathConfig(
         kind=_as_str(raw["kind"], f"{where}.kind"),
         x=_as_float(raw["x"], f"{where}.x"),
@@ -799,6 +829,7 @@ def _parse_path(raw: Any, where: str) -> PathConfig:
         pose_known=_as_bool(raw["pose_known"], f"{where}.pose_known"),
         yaw_wobble_std=_as_float(raw["yaw_wobble_std"], f"{where}.yaw_wobble_std"),
         xy_noise_std=_as_float(raw["xy_noise_std"], f"{where}.xy_noise_std"),
+        yaw_bias=_as_float(raw.get("yaw_bias", 0.0), f"{where}.yaw_bias"),
     )
 
 
@@ -1021,3 +1052,22 @@ def _parse_analysis(raw: Any, where: str) -> AnalysisConfig:
     plots = tuple(_as_str(name, f"{where}.plots") for name in raw["plots"])
 
     return AnalysisConfig(b3_reference=b3_reference, monte_carlo=monte_carlo, plots=plots)
+
+
+def load_yaw_sensitivity_config(path: Path) -> YawSensitivityConfig:
+    """Load the step-8d experiment config; its `run:` path resolves like `scenario:`."""
+    raw = _read_yaml(path)
+    where = str(path)
+    _check_keys(raw, where, required={"name", "run", "yaw_bias_deg", "yaw_wobble_std_deg",
+                                      "seeds"})
+    for key in ("yaw_bias_deg", "yaw_wobble_std_deg"):
+        if not isinstance(raw[key], list) or not raw[key]:
+            raise ValueError(f"{where}.{key}: expected a non-empty list of degrees")
+    return YawSensitivityConfig(
+        name=_as_str(raw["name"], f"{where}.name"),
+        run=load_run_config(Path(_as_str(raw["run"], f"{where}.run"))),
+        yaw_bias_deg=tuple(_as_float(v, f"{where}.yaw_bias_deg") for v in raw["yaw_bias_deg"]),
+        yaw_wobble_std_deg=tuple(_as_float(v, f"{where}.yaw_wobble_std_deg")
+                                 for v in raw["yaw_wobble_std_deg"]),
+        seeds=_as_int(raw["seeds"], f"{where}.seeds"),
+    )
