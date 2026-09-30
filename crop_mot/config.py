@@ -45,6 +45,31 @@ class RowConfig:
     spacing: float
 
 
+def nominal_positions(rows: tuple[RowConfig, ...]) -> tuple[np.ndarray, np.ndarray]:
+    """The nominal plant positions of a set of rows, row by row. [B1/B4]
+
+    Plants at y_start, y_start + spacing, ... up to and including y_end. Shared by the
+    simulator, which adds planting jitter to get the true field, and by the filter's
+    planting plan (roadmap step 8a), which does not: the plan is what the farmer knows. One
+    function, so the two grids cannot drift apart.
+
+    Args:
+        rows: the rows.
+
+    Returns:
+        (positions of shape (n, 2), row index of shape (n,)), in row-major order.
+    """
+    positions = []
+    row_index = []
+    for i, row in enumerate(rows):
+        # The small tolerance keeps a plant exactly at y_end despite floating-point division.
+        n_in_row = int(np.floor((row.y_end - row.y_start) / row.spacing + 1e-9)) + 1
+        for j in range(n_in_row):
+            positions.append([row.x, row.y_start + j * row.spacing])
+            row_index.append(i)
+    return np.array(positions, dtype=float).reshape(-1, 2), np.array(row_index, dtype=int)
+
+
 @dataclass(frozen=True)
 class RegionConfig:
     """An axis-aligned rectangle in the world frame, in metres. [B1]"""
@@ -374,6 +399,26 @@ class PruneConfig:
 
 
 @dataclass(frozen=True)
+class PlanConfig:
+    """The planting plan the filter knows: the nominal slots of the N plants. [B4, step 8a]
+
+    The filter-side twin of `world.rows`, as `assumed_sensor` is the twin of `sensor`: the
+    nominal plan the farmer knows, never the jittered positions in truth.jsonl, so a filter
+    given it stays truth-blind. A plan that differs from the world is a model-mismatch
+    experiment (missing plants are roadmap step 8c).
+
+    Attributes:
+        rows: the planned rows, in the `world.rows` format; slot i is the i-th nominal
+            position of `nominal_positions(rows)`, row by row.
+        prior_std: prior position standard deviation per axis, metres: the RTK position
+            error and the planting accuracy combined, e.g. sqrt(0.02^2 + 0.03^2) = 0.036.
+    """
+
+    rows: tuple[RowConfig, ...]
+    prior_std: float
+
+
+@dataclass(frozen=True)
 class FilterConfig:
     """Everything needed to build one filter. [B2/B4]
 
@@ -386,13 +431,16 @@ class FilterConfig:
         motion: target dynamics.
         measurement: the filter's measurement model.
         assumed_sensor: the filter's beliefs about p_D, lambda_FA and the FOV.
-        birth: birth model.
+        birth: birth model; None for a filter without births (`birth: null`), e.g. the
+            known-N map of roadmap step 8a.
         survival: survival model.
         gate: gating parameters.
         collapse: how the post-update mixture of branch densities is collapsed back to one
             Gaussian; a key into `crop_mot.filters.collapse.COLLAPSE_STRATEGIES`. Optional in
             the YAML, default "best_branch".
         prune: component deletion. Optional in the YAML, default off (r_min = 0).
+        plan: the planting plan, whose slots are the initial tracks of a known-N map
+            (roadmap step 8a); None, the default, for no plan. Optional in the YAML.
         p_D_evaluation: how p_D is evaluated for a Gaussian track; a key into
             `crop_mot.filters.detection_prob.PD_EVALUATIONS`. Optional in the YAML, default
             "at_mean" (roadmap step 3b, decision D27).
@@ -402,12 +450,13 @@ class FilterConfig:
     motion: MotionConfig
     measurement: MeasurementConfig
     assumed_sensor: AssumedSensorConfig
-    birth: BirthConfig
+    birth: BirthConfig | None
     survival: SurvivalConfig
     gate: GateConfig
     collapse: str = "best_branch"
     prune: PruneConfig = PruneConfig()
     p_D_evaluation: str = "at_mean"
+    plan: PlanConfig | None = None
 
 
 # --------------------------------------------------------------------------------------
@@ -647,13 +696,13 @@ def _parse_weeds(raw: Any, where: str) -> WeedsConfig:
     return WeedsConfig(density=density, region=_parse_region(raw["region"], f"{where}.region"))
 
 
-def _parse_world(raw: Any, where: str) -> WorldConfig:
-    _check_keys(raw, where, required={"rows", "position_jitter_std"}, optional={"weeds"})
-    if not isinstance(raw["rows"], list) or not raw["rows"]:
-        raise ValueError(f"{where}.rows: expected a non-empty list")
+def _parse_rows(raw: Any, where: str) -> tuple[RowConfig, ...]:
+    """A non-empty list of {x, y_start, y_end, spacing} rows (world.rows and plan.rows)."""
+    if not isinstance(raw, list) or not raw:
+        raise ValueError(f"{where}: expected a non-empty list")
     rows = []
-    for i, row in enumerate(raw["rows"]):
-        row_where = f"{where}.rows[{i}]"
+    for i, row in enumerate(raw):
+        row_where = f"{where}[{i}]"
         _check_keys(row, row_where, required={"x", "y_start", "y_end", "spacing"})
         rows.append(RowConfig(
             x=_as_float(row["x"], f"{row_where}.x"),
@@ -661,7 +710,12 @@ def _parse_world(raw: Any, where: str) -> WorldConfig:
             y_end=_as_float(row["y_end"], f"{row_where}.y_end"),
             spacing=_as_float(row["spacing"], f"{row_where}.spacing"),
         ))
-    return WorldConfig(rows=tuple(rows),
+    return tuple(rows)
+
+
+def _parse_world(raw: Any, where: str) -> WorldConfig:
+    _check_keys(raw, where, required={"rows", "position_jitter_std"}, optional={"weeds"})
+    return WorldConfig(rows=_parse_rows(raw["rows"], f"{where}.rows"),
                        position_jitter_std=_as_float(raw["position_jitter_std"],
                                                      f"{where}.position_jitter_std"),
                        weeds=(_parse_weeds(raw["weeds"], f"{where}.weeds")
@@ -761,7 +815,7 @@ def _parse_filter(raw: Any, where: str) -> FilterConfig:
     _check_keys(raw, where,
                 required={"kind", "motion", "measurement", "assumed_sensor", "birth",
                           "survival", "gate"},
-                optional={"collapse", "prune", "p_D_evaluation"})
+                optional={"collapse", "prune", "p_D_evaluation", "plan"})
 
     motion = raw["motion"]
     _check_keys(motion, f"{where}.motion", required={"kind"}, optional={"q"})
@@ -771,7 +825,9 @@ def _parse_filter(raw: Any, where: str) -> FilterConfig:
                 required={"fov", "detection", "lambda_FA"})
 
     birth = raw["birth"]
-    if isinstance(birth, dict) and birth.get("kind") == "from_measurements":
+    if birth is None:
+        birth_cfg = None
+    elif isinstance(birth, dict) and birth.get("kind") == "from_measurements":
         _check_keys(birth, f"{where}.birth", required={"kind", "seeds", "r_b", "init_cov"})
         seeds = _parse_seeds(birth["seeds"], f"{where}.birth.seeds")
         at_scan, detection_index = seeds[0]
@@ -793,6 +849,22 @@ def _parse_filter(raw: Any, where: str) -> FilterConfig:
         at_scan = _as_int(birth["at_scan"], f"{where}.birth.at_scan")
         detection_index = _as_int(birth["detection_index"], f"{where}.birth.detection_index")
         position = None
+    if birth is not None:
+        birth_cfg = BirthConfig(
+            kind=_as_str(birth["kind"], f"{where}.birth.kind"),
+            at_scan=at_scan,
+            detection_index=detection_index,
+            r_b=_as_float(birth["r_b"], f"{where}.birth.r_b"),
+            init_cov=_as_matrix(birth["init_cov"], f"{where}.birth.init_cov"),
+            seeds=seeds,
+            position=position,
+        )
+
+    plan = raw.get("plan")
+    if plan is not None:
+        _check_keys(plan, f"{where}.plan", required={"rows", "prior_std"})
+        plan = PlanConfig(rows=_parse_rows(plan["rows"], f"{where}.plan.rows"),
+                          prior_std=_as_float(plan["prior_std"], f"{where}.plan.prior_std"))
 
     prune = raw.get("prune", {})
     _check_keys(prune, f"{where}.prune", required=set(), optional={"r_min"})
@@ -817,15 +889,7 @@ def _parse_filter(raw: Any, where: str) -> FilterConfig:
                                        f"{where}.assumed_sensor.detection"),
             lambda_FA=_as_float(assumed["lambda_FA"], f"{where}.assumed_sensor.lambda_FA"),
         ),
-        birth=BirthConfig(
-            kind=_as_str(birth["kind"], f"{where}.birth.kind"),
-            at_scan=at_scan,
-            detection_index=detection_index,
-            r_b=_as_float(birth["r_b"], f"{where}.birth.r_b"),
-            init_cov=_as_matrix(birth["init_cov"], f"{where}.birth.init_cov"),
-            seeds=seeds,
-            position=position,
-        ),
+        birth=birth_cfg,
         survival=SurvivalConfig(p_S=_as_float(survival.get("p_S", 1.0),
                                               f"{where}.survival.p_S")),
         gate=GateConfig(chi2_prob=_as_float(gate.get("chi2_prob", 0.99),
@@ -834,6 +898,7 @@ def _parse_filter(raw: Any, where: str) -> FilterConfig:
         prune=PruneConfig(r_min=r_min),
         p_D_evaluation=_as_str(raw.get("p_D_evaluation", "at_mean"),
                                f"{where}.p_D_evaluation"),
+        plan=plan,
     )
 
 

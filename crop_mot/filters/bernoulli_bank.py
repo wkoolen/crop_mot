@@ -20,10 +20,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from crop_mot.config import FilterConfig, PruneConfig
+import numpy as np
+
+from crop_mot.config import FilterConfig, PlanConfig, PruneConfig, nominal_positions
 from crop_mot.filters.base import BirthModel, TrackingFilter
 from crop_mot.filters.bernoulli import BernoulliFilter, BernoulliState, build_bernoulli
-from crop_mot.filters.birth import NoBirth, SingleFromMeasurement, build_single_birth
+from crop_mot.filters.birth import SingleFromMeasurement, build_single_birth
 from crop_mot.types import Scan, TrackEstimate
 
 
@@ -52,17 +54,20 @@ class BernoulliBankFilter(TrackingFilter[BernoulliBankState]):
             ids are fixed by the config and match between a pruned and an unpruned run.
         r_min: prune threshold; a component whose predicted r is below it is deleted.
             0.0 never deletes.
+        initial: the components that exist before the first scan: the slots of a planting
+            plan (roadmap step 8a, `plan_components`), empty without one.
         name: "bernoulli_bank".
     """
 
     single: BernoulliFilter
     births: tuple[BirthModel, ...]
     r_min: float
+    initial: tuple[BernoulliState, ...] = ()
     name: str = "bernoulli_bank"
 
     def initial_state(self) -> BernoulliBankState:
-        """No components: nothing exists until a seed's scan arrives. [B2]"""
-        return BernoulliBankState(components=())
+        """The planting plan's slots, if any; otherwise nothing until a seed's scan. [B2/B4]"""
+        return BernoulliBankState(components=self.initial)
 
     def predict(self, state: BernoulliBankState, dt: float) -> BernoulliBankState:
         """Time update of every component, then pruning. [B2]
@@ -135,7 +140,8 @@ def build_bernoulli_bank(cfg: FilterConfig) -> BernoulliBankFilter:
     track per entry of `birth.seeds`; "single_from_measurement" seeds one track from
     (at_scan, detection_index), which makes a one-seed bank the single Bernoulli filter;
     "injected" places the controlled phantom of roadmap step 4a (D28), which the bank can
-    then prune.
+    then prune. With `birth: null` and a `plan`, the bank starts from the plan's slots at
+    r = 1 and has no births: the known-N map of roadmap step 8a.
 
     Args:
         cfg: the `filter:` block of a run config.
@@ -144,12 +150,17 @@ def build_bernoulli_bank(cfg: FilterConfig) -> BernoulliBankFilter:
         A ready-to-run BernoulliBankFilter.
 
     Raises:
-        ValueError: if cfg.kind is not "bernoulli_bank", or a referenced model kind is
-            unknown.
+        ValueError: if cfg.kind is not "bernoulli_bank", a referenced model kind is
+            unknown, or a plan comes with births.
     """
     if cfg.kind != "bernoulli_bank":
         raise ValueError(f"build_bernoulli_bank got filter kind {cfg.kind!r}")
-    if cfg.birth.kind == "from_measurements":
+    if cfg.plan is not None and cfg.birth is not None:
+        raise ValueError("a planting plan with births waits on roadmap step 13 (their track "
+                         "ids would collide); use birth: null with filter.plan")
+    if cfg.birth is None:
+        births = ()
+    elif cfg.birth.kind == "from_measurements":
         births = tuple(
             SingleFromMeasurement(at_scan=at_scan, detection_index=detection_index,
                                   r_b=cfg.birth.r_b, init_cov=cfg.birth.init_cov)
@@ -160,7 +171,28 @@ def build_bernoulli_bank(cfg: FilterConfig) -> BernoulliBankFilter:
 
     # The single filter is built by its own builder, so the bank cannot drift from it;
     # only its birth model is swapped out, and pruning stays with the bank.
-    single_cfg = replace(cfg, kind="bernoulli", prune=PruneConfig(),
-                         birth=replace(cfg.birth, kind="single_from_measurement", seeds=()))
-    single = replace(build_bernoulli(single_cfg), birth=NoBirth())
-    return BernoulliBankFilter(single=single, births=births, r_min=cfg.prune.r_min)
+    single = build_bernoulli(replace(cfg, kind="bernoulli", prune=PruneConfig(), birth=None,
+                                     plan=None))
+    initial = () if cfg.plan is None else plan_components(cfg.plan)
+    return BernoulliBankFilter(single=single, births=births, r_min=cfg.prune.r_min,
+                               initial=initial)
+
+
+def plan_components(plan: PlanConfig) -> tuple[BernoulliState, ...]:
+    """One component per planned slot, r = 1: the known-N map (roadmap step 8a). [B4]
+
+    Slot i is the i-th nominal position of the plan's rows, row by row, with covariance
+    prior_std^2 I, and its track id is i. r = 1 because N is known: certainty is absorbing
+    [A2 §5], so every slot stays at r = 1 and the problem is association and position
+    only. Bounded N (r_0 < 1 per slot) is roadmap step 8c.
+
+    Args:
+        plan: the planting plan.
+
+    Returns:
+        The components, in slot order.
+    """
+    positions, _ = nominal_positions(plan.rows)
+    cov = plan.prior_std**2 * np.eye(positions.shape[1])
+    return tuple(BernoulliState(r=1.0, mean=position.copy(), cov=cov.copy(), track_id=i)
+                 for i, position in enumerate(positions))

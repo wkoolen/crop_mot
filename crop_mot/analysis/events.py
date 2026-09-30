@@ -204,7 +204,7 @@ def predicted_track_moments(
     """
     if cfg.motion.kind != "static":
         raise ValueError(f"unknown motion kind {cfg.motion.kind!r}")
-    motion = StaticTarget(q=cfg.motion.q, dim_x=cfg.birth.init_cov.shape[0])
+    motion = StaticTarget(q=cfg.motion.q, dim_x=build_measurement_model(cfg.measurement).dim_x)
 
     moments = [None]
     for k in range(1, len(records)):

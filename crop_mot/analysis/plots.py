@@ -629,6 +629,9 @@ def plot_nees(run: RunDir, filter_name: str, out: Path) -> Path:
             label="average NEES")
     if np.any(error.n_pairs > 0):
         ax.set_yscale("log")
+        plain = FuncFormatter(lambda value, _: f"{value:g}")
+        ax.yaxis.set_major_formatter(plain)
+        ax.yaxis.set_minor_formatter(plain)
     ax.set_ylabel("NEES")
     ax.set_title(f"NEES of confirmed tracks matched to plants, {filter_name}", color=INK,
                  fontsize=11)

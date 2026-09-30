@@ -1,0 +1,46 @@
+# Roadmap step 8a: N known, in the field with weeds. Same filter as b4_known_n_bank.yaml;
+# see its comments. Before class labels (roadmap step 8b), a weed return is to the filter
+# one more false positive - but a recurring one, at a fixed place near the rows.
+#
+# Each slot is a Bernoulli component with r = 1 (N is known; certainty is absorbing,
+# A2 §5), placed at its nominal position with a prior std of sqrt(0.02^2 + 0.03^2) =
+# 0.036 m. There are no births: nothing new is ever believed to exist. Clutter is not in
+# the plan, so to the filter every clutter return is a false positive.
+#
+# The prior (about 4 cm) is much tighter than the measurement noise (20 cm), so the
+# problem is almost pure association. The innovation covariance is still dominated by R,
+# so each gate is about 0.6 m wide and neighbouring plants 0.35 m apart share detections:
+# the bank's independence approximation (D12) does not hold here, which is what JPDA
+# (roadmap step 12) is for. `gate_contents` measures how often each failure happens.
+
+name: b4_known_n_bank_weeds
+seed: 42
+
+scenario: configs/b1_two_rows_weeds.yaml
+
+filter:
+  kind: bernoulli_bank
+  motion: {kind: static, q: 0.0}
+  measurement:
+    kind: linear_xy
+    R: [[0.04, 0.0],
+        [0.0, 0.04]]
+  assumed_sensor:
+    fov: {min_range: 0.3, max_range: 4.0, half_angle: 0.6}
+    detection: {kind: constant, p_D: 0.85}
+    lambda_FA: 2.0
+  # The farmer's plan: the scenario's rows, nominal positions only (never truth.jsonl).
+  plan:
+    rows:
+      - {x: -0.75, y_start: 0.0, y_end: 12.0, spacing: 0.35}
+      - {x:  0.75, y_start: 0.0, y_end: 12.0, spacing: 0.35}
+    prior_std: 0.036
+  birth: null          # N known: no births
+  survival: {p_S: 1.0}
+  gate: {chi2_prob: 0.99}
+  collapse: best_branch
+
+analysis:
+  b3_reference: null   # every slot has r = 1 throughout; the A2 check is for births
+  monte_carlo: null
+  plots: [scene, tracks, existence_map, cardinality, gospa, nees]

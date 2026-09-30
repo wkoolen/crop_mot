@@ -66,10 +66,13 @@ def cross_check_run(run: RunDir, cfg: RunConfig) -> list[TrackCheck]:
         when nothing was born.
 
     Raises:
-        ValueError: if the config names no b3_reference.
+        ValueError: if the config names no b3_reference, or the filter has no births.
     """
     if cfg.analysis.b3_reference is None:
         raise ValueError("the B3 cross-check needs analysis.b3_reference in the run config")
+    if cfg.filter_cfg.birth is None:
+        raise ValueError("the B3 cross-check follows tracks from a birth; a planting plan's "
+                         "tracks exist before scan 0 and wait on roadmap step 8c")
     reference = REFERENCES[cfg.analysis.b3_reference](p_S=cfg.filter_cfg.survival.p_S,
                                                        r_birth=cfg.filter_cfg.birth.r_b)
     records = read_estimates(run.estimates(checked_log_name(cfg.filter_cfg)))
