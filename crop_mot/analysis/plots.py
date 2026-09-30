@@ -24,6 +24,12 @@ from matplotlib.patches import Ellipse, Patch, Wedge
 from matplotlib.ticker import MaxNLocator
 
 from crop_mot.analysis.counts import scan_counts, weed_origin
+from crop_mot.analysis.estimates_log import (
+    TrackLifetime,
+    r_trajectory,
+    read_estimates,
+    track_lifetimes,
+)
 from crop_mot.analysis.evaluation import (
     GOSPA_C,
     GOSPA_P,
@@ -35,13 +41,8 @@ from crop_mot.analysis.evaluation import (
     nees_band,
     scan_views,
 )
-from crop_mot.analysis.estimates_log import (
-    TrackLifetime,
-    r_trajectory,
-    read_estimates,
-    track_lifetimes,
-)
 from crop_mot.analysis.events import gated_detection_indices, predicted_track_moments
+from crop_mot.analysis.fates import FATES, STRATA, FateProportion
 from crop_mot.analysis.montecarlo import MonteCarloResult, standard_error
 from crop_mot.config import (
     RunConfig,
@@ -420,6 +421,63 @@ def plot_r_montecarlo(result: MonteCarloResult, r_ref: np.ndarray | None, out: P
     ax.set_ylabel("existence probability r")
     ax.set_title("Monte-Carlo mean r of the first track (descriptive)", color=INK, fontsize=11)
     ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), frameon=False, fontsize=9)
+    return _save(fig, out)
+
+
+FATE_LABELS = {
+    "pruned": "pruned",
+    "confirmed_on_plant": "confirmed on a plant",
+    "confirmed_on_weed": "confirmed on a weed",
+    "sustained_by_clutter": "sustained by clutter",
+    "alive_unconfirmed": "alive, unconfirmed",
+}
+STRATUM_LABELS = {
+    "all": "all seeds",
+    "weed_in_gate": "weed return in gate",
+    "no_weed_in_gate": "no weed return in gate",
+}
+
+
+def plot_phantom_fates(proportions: dict[str, dict[str, FateProportion]], out: Path,
+                       title: str = "") -> Path:
+    """The controlled phantom's fate over seeds, per stratum, with Wilson intervals. [B3, 4a]
+
+    One panel per stratum (all seeds, then with and without a weed return in the gate),
+    one bar per fate: the share of that stratum's seeds, its 95 % Wilson interval, and
+    the count behind it. Fates are told apart by their axis labels, not by colour.
+
+    Args:
+        proportions: from `fates.fate_proportions`.
+        out: destination PNG path.
+        title: optional figure title.
+
+    Returns:
+        The path written.
+    """
+    fig = Figure(figsize=(9.0, 3.4), facecolor=SURFACE, layout="constrained")
+    axes = fig.subplots(1, len(STRATA), sharey=True, sharex=True)
+    rows = np.arange(len(FATES))
+    for ax, stratum in zip(axes, STRATA):
+        _style_axes(ax)
+        shares = proportions[stratum]
+        n = shares[FATES[0]].n
+        values = np.array([shares[f].count / n if n else 0.0 for f in FATES])
+        low = np.array([shares[f].low for f in FATES])
+        high = np.array([shares[f].high for f in FATES])
+        ax.barh(rows, values, height=0.6, color=SERIES_1, edgecolor=SURFACE, linewidth=1.0)
+        ax.errorbar(values, rows, xerr=[values - low, high - values], fmt="none",
+                    ecolor=INK_SECONDARY, elinewidth=1.2, capsize=3)
+        for row, fate in zip(rows, FATES):
+            ax.annotate(f"{shares[fate].count}/{n}", (high[row], row), xytext=(4, 0),
+                        textcoords="offset points", va="center", color=INK_SECONDARY,
+                        fontsize=8)
+        ax.set_xlim(0.0, 1.15)
+        ax.set_xlabel("share of seeds")
+        ax.set_title(f"{STRATUM_LABELS[stratum]} (n = {n})", color=INK, fontsize=10)
+    axes[0].set_yticks(rows, [FATE_LABELS[f] for f in FATES])
+    axes[0].invert_yaxis()
+    if title:
+        fig.suptitle(title, color=INK, fontsize=11)
     return _save(fig, out)
 
 

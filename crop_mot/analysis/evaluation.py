@@ -34,6 +34,11 @@ R_CONF = 0.5
 # further than that from every plant is a false track, not a poor position.
 GOSPA_C = 0.5
 GOSPA_P = 2.0
+# A track is on a plant or weed when its mean is within D_MATCH of it, the nearest one
+# deciding (decision D28, revised): the GOSPA cutoff, so a fate and GOSPA agree on what
+# a false track is. The first value, 0.2 m, labelled plant captures sitting 0.2-0.3 m off
+# the plant as "sustained by clutter".
+D_MATCH = GOSPA_C
 
 
 @dataclass(frozen=True)

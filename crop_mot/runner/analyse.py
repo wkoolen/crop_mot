@@ -15,6 +15,8 @@ from pathlib import Path
 
 from crop_mot.analysis.crosscheck import checked_log_name, cross_check_run
 from crop_mot.analysis.estimates_log import ScanEstimates, read_estimates, track_lifetimes
+from crop_mot.analysis.evaluation import D_MATCH, R_CONF
+from crop_mot.analysis.fates import fate_proportions, phantom_outcome
 from crop_mot.analysis.metrics import R_TOLERANCE
 from crop_mot.analysis.montecarlo import (
     cross_check_summary,
@@ -32,6 +34,7 @@ from crop_mot.analysis.plots import (
     plot_hypotheses,
     plot_lifetimes,
     plot_nees,
+    plot_phantom_fates,
     plot_r_montecarlo,
     plot_r_vs_analytic,
     plot_r_vs_k,
@@ -44,8 +47,8 @@ from crop_mot.runner.run_dir import RunDir
 
 # Every plot `analyse` knows how to draw, as named in the config's `analysis.plots`.
 PLOT_NAMES = ("scene", "counts", "r_vs_k", "hypotheses", "hypotheses_anim", "r_vs_analytic",
-              "r_montecarlo", "tracks", "existence_map", "cardinality", "gospa", "nees",
-              "lifetimes")
+              "r_montecarlo", "phantom_fates", "tracks", "existence_map", "cardinality",
+              "gospa", "nees", "lifetimes")
 # The step-5 figures that work for any filter: each reads only (run, filter_name).
 ANY_FILTER_PLOTS = {
     "tracks": plot_tracks,
@@ -139,6 +142,8 @@ def analyse_run(run: RunDir, plots: Sequence[str] | None = None,
             _cross_check(run, cfg)
         elif name == "r_montecarlo":
             _monte_carlo(run, cfg, out)
+        elif name == "phantom_fates":
+            _phantom_fates(run, cfg, out)
         else:
             ANY_FILTER_PLOTS[name](run, filter_name, out)
 
@@ -190,6 +195,36 @@ def _monte_carlo(run: RunDir, cfg: RunConfig, out: Path) -> None:
                         {"r": first_track_r, "cross_check": cross_check_run})
     plot_r_montecarlo(mean_r(trials), None, out)
     _write_metrics(run, "b3_monte_carlo", asdict(cross_check_summary(trials)))
+
+
+def _phantom_fates(run: RunDir, cfg: RunConfig, out: Path) -> None:
+    """The controlled phantom's fate over seeds (roadmap step 4a, D28, D34).
+
+    Seeds cfg.seed, cfg.seed + 1, ... - the first is this run's own - each simulated and
+    filtered in a temporary folder inside the run folder; each seed's one outcome is the
+    phantom's fate and what fell in its gate. metrics.json gets a "phantom_fates" entry: the
+    thresholds, the proportions with Wilson intervals per stratum, and the per-seed
+    outcomes, so any stratification can be redone without rerunning.
+    """
+    if cfg.analysis.monte_carlo is None:
+        raise ValueError("plot 'phantom_fates' needs analysis.monte_carlo in the run config")
+    trials = run_trials(cfg, cfg.analysis.monte_carlo.n_runs, cfg.seed, run.root,
+                        {"phantom": phantom_outcome})
+    outcomes = [trial.values["phantom"] for trial in trials
+                if trial.values["phantom"] is not None]
+    proportions = fate_proportions(outcomes)
+    plot_phantom_fates(proportions, out,
+                       title=f"{cfg.name}: the phantom's fate over {len(outcomes)} seeds")
+    _write_metrics(run, "phantom_fates", {
+        "r_conf": R_CONF,
+        "d_match": D_MATCH,
+        "n_runs": len(trials),
+        "n_without_phantom": len(trials) - len(outcomes),
+        "proportions": {stratum: {fate: asdict(share) for fate, share in shares.items()}
+                        for stratum, shares in proportions.items()},
+        "seeds": [{"seed": trial.seed, **asdict(trial.values["phantom"])}
+                  for trial in trials if trial.values["phantom"] is not None],
+    })
 
 
 def _write_metrics(run: RunDir, key: str, value: object) -> None:
