@@ -13,6 +13,7 @@ Subcommands:
     track     --config configs/b2_bernoulli_phantom.yaml [B2]
     analyse   --run runs/<stamp>_...                     [B1/B2/B3]
     candidates --run runs/<stamp>_... --min-distance 1.0 [B2] phantom seeds for the bank
+    scaling   --config ... --sweep lambda_FA --values 1 2 4 8  [B4] time per scan
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from pathlib import Path
 from crop_mot.analysis.candidates import assumed_fov, format_candidates, phantom_candidates
 from crop_mot.runner.analyse import analyse_run
 from crop_mot.runner.run_dir import RunDir
+from crop_mot.runner.scaling import scaling_from_config
 from crop_mot.runner.simulate import simulate_from_config
 from crop_mot.runner.track import track_from_config
 
@@ -66,6 +68,17 @@ def build_parser() -> argparse.ArgumentParser:
                             help="minimum distance to any plant in m (default: 1.0)")
     candidates.add_argument("--min-separation", type=float, default=1.0,
                             help="minimum distance between candidates in m (default: 1.0)")
+    scaling = commands.add_parser(
+        "scaling", help="[B4] update time per scan against problem size (roadmap 4c)")
+    scaling.add_argument("--config", type=Path, required=True, help="run YAML to sweep")
+    scaling.add_argument("--sweep", required=True,
+                         choices=["row_length", "spacing", "lambda_FA", "weed_density"],
+                         help="the scenario parameter to vary")
+    scaling.add_argument("--values", type=float, nargs="+", required=True,
+                         help="the parameter's values")
+    scaling.add_argument("--seeds", type=int, default=3, help="seeds per value (default: 3)")
+    scaling.add_argument("--runs", type=Path, default=Path("runs"),
+                         help="directory holding run folders (default: runs)")
     return parser
 
 
@@ -84,6 +97,9 @@ def main(argv: list[str] | None = None) -> int:
             run = simulate_from_config(args.config, args.runs)
         elif args.command == "track":
             run = track_from_config(args.config, args.runs, args.run)
+        elif args.command == "scaling":
+            run = scaling_from_config(args.config, args.sweep, args.values, args.seeds,
+                                      args.runs)
         elif args.command == "candidates":
             run = RunDir(args.run)
             print(format_candidates(phantom_candidates(

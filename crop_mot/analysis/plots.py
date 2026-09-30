@@ -21,7 +21,7 @@ from matplotlib.colors import LinearSegmentedColormap, PowerNorm, to_rgba
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from matplotlib.patches import Ellipse, Patch, Wedge
-from matplotlib.ticker import MaxNLocator
+from matplotlib.ticker import FuncFormatter, MaxNLocator
 
 from crop_mot.analysis.counts import scan_counts, weed_origin
 from crop_mot.analysis.estimates_log import (
@@ -44,6 +44,7 @@ from crop_mot.analysis.evaluation import (
 from crop_mot.analysis.events import gated_detection_indices, predicted_track_moments
 from crop_mot.analysis.fates import FATES, STRATA, FateProportion
 from crop_mot.analysis.montecarlo import MonteCarloResult, standard_error
+from crop_mot.analysis.timing import SWEEPS, ScalingResult
 from crop_mot.config import (
     RunConfig,
     ScenarioConfig,
@@ -478,6 +479,45 @@ def plot_phantom_fates(proportions: dict[str, dict[str, FateProportion]], out: P
     axes[0].invert_yaxis()
     if title:
         fig.suptitle(title, color=INK, fontsize=11)
+    return _save(fig, out)
+
+
+def plot_scaling(result: ScalingResult, out: Path) -> Path:
+    """Update time per scan against problem size, with the real-time budget. [B4, 4c]
+
+    Log-log axes: the median and the 95th percentile of the update time per scan (scan 0
+    excluded, it includes warm-up) at each swept value, against the problem size measured
+    in those runs, and the scan period as the budget line. The title gives the fitted
+    exponent of the median, the number to compare with the method's expected cost.
+
+    Args:
+        result: from `runner.scaling.run_scaling`.
+        out: destination PNG path.
+
+    Returns:
+        The path written.
+    """
+    spec = SWEEPS[result.sweep]
+    size = np.array([p.size for p in result.points])
+    fig, (ax,) = _new_figure()
+    ax.axhline(result.budget_s, color=INK_SECONDARY, linewidth=1.0,
+               label=f"real-time budget: scan period {result.budget_s:g} s")
+    ax.plot(size, [p.p95_s for p in result.points], color=SERIES_2, linewidth=2.0,
+            marker="o", markersize=6, label="95th percentile")
+    ax.plot(size, [p.median_s for p in result.points], color=SERIES_1, linewidth=2.0,
+            marker="o", markersize=6, label="median")
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    plain = FuncFormatter(lambda value, _: f"{value:g}")
+    ax.xaxis.set_major_formatter(plain)
+    ax.xaxis.set_minor_formatter(plain)
+    ax.set_xlabel(spec.size_label)
+    ax.set_ylabel("update time per scan [s]")
+    slope = "n/a" if np.isnan(result.slope) else f"{result.slope:.2f}"
+    ax.set_title(f"Time per scan, {result.filter_name}: slope of the median {slope}\n"
+                 f"sweep of {spec.parameter}, {result.n_seeds} seeds per value", color=INK,
+                 fontsize=10)
+    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), frameon=False, fontsize=9)
     return _save(fig, out)
 
 

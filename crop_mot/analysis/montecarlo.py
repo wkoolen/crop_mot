@@ -94,7 +94,7 @@ def run_trials(
             seed_cfg = replace(cfg, seed=seed, scenario=replace(cfg.scenario, seed=seed))
             run = RunDir(Path(tmp) / f"seed{seed}")
             run.plots.mkdir(parents=True)
-            simulate(seed_cfg.scenario, run)
+            simulate(seed_cfg.scenario, run, summary=False)
             run_configured_filter(seed_cfg.filter_cfg, run)
             trials.append(Trial(seed=seed, values={name: measure(run, seed_cfg)
                                                    for name, measure in measures.items()}))

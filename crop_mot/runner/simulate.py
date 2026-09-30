@@ -23,7 +23,7 @@ from crop_mot.world.path import generate_path
 from crop_mot.world.truth import GroundTruth, write_truth
 
 
-def simulate(cfg: ScenarioConfig, run: RunDir) -> None:
+def simulate(cfg: ScenarioConfig, run: RunDir, summary: bool = True) -> None:
     """Generate a scenario and write it to a run folder. [B1]
 
     Steps:
@@ -35,7 +35,8 @@ def simulate(cfg: ScenarioConfig, run: RunDir) -> None:
          filter will see and the ScanLabels it must not.
       4. Write truth.jsonl, labels.jsonl and detections.jsonl, then run_meta.json.
       5. Print the clairvoyant per-scan counts summary (`crop_mot.analysis.counts`) to
-         stdout. Nothing extra is written: the counts are derived from labels.jsonl.
+         stdout, unless `summary` is False. Nothing extra is written: the counts are
+         derived from labels.jsonl.
 
     Writes detections.jsonl LAST of the three data files, so that its presence is a
     reliable signal that the simulation completed - a half-written detections file consumed
@@ -47,6 +48,8 @@ def simulate(cfg: ScenarioConfig, run: RunDir) -> None:
     Args:
         cfg: the parsed scenario configuration.
         run: an existing run folder to write into.
+        summary: print the counts summary; the Monte-Carlo trial loop, which simulates
+            hundreds of runs, turns it off.
     """
     streams = substreams(cfg.seed)
     field = generate_field(cfg.world, streams["field"])
@@ -78,7 +81,8 @@ def simulate(cfg: ScenarioConfig, run: RunDir) -> None:
     write_labels(run.labels, labels)
     write_detections(run.detections, scans)
     write_run_meta(run, cfg.seed, sys.argv)
-    print(format_summary(scan_counts(labels)))
+    if summary:
+        print(format_summary(scan_counts(labels)))
 
 
 def simulate_from_config(config_path: Path, runs_base: Path) -> RunDir:

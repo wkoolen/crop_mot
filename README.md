@@ -62,6 +62,8 @@ python3 -m crop_mot analyse  --run runs/<stamp>_b2_bernoulli_bank_phantoms_seed4
 python3 -m crop_mot simulate --config configs/b1_two_rows_weeds.yaml     # B1 with weeds: same field + persistent false targets
 python3 -m crop_mot track    --config configs/b2_bernoulli_bank_weeds.yaml  # B2: the same phantoms, in the field with weeds
 python3 -m crop_mot analyse  --run runs/<stamp>_b2_bernoulli_bank_weeds_seed42 --plots tracks existence_map cardinality gospa nees lifetimes  # figures for any filter
+python3 -m crop_mot analyse  --run runs/<stamp>_b2_phantom_fates_seed42 --plots phantom_fates  # the phantom's fate over 200 seeds
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 python3 -m crop_mot scaling --config configs/b2_bernoulli_bank_weeds.yaml --sweep lambda_FA --values 1 2 4 8 16 --seeds 3
 python3 -m pytest tests -q
 ```
 
@@ -93,6 +95,7 @@ runs/<timestamp>_<name>_seed<seed>/
                              edge-lost plant ids per scan                (EVAL ONLY)
   detections.jsonl           the only filter input
   estimates_bernoulli.jsonl  one per filter
+  timing_bernoulli.jsonl     per-scan predict/update/extract times, one per filter run
   estimates_<filter>_unpruned.jsonl   the same filter without pruning, when it prunes
   metrics.json               the B3 cross-check: per track, and per seed over many seeds
   plots/
