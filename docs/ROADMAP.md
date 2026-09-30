@@ -684,7 +684,7 @@ the commit of the step named; the number is reserved so parallel sessions do not
 
 | Step | Status | Notes |
 |---|---|---|
-| 1 | not started | wording for D16 in step 1 |
+| 1 | done | 2026-09-30: D16 reworded to "simplification for now, revisited if RTK is not on the Go2; heading error studied in step 8d" (first recorded as "thesis scope" in c049214). `world/path.py` module and `generate_path` docstrings updated. No behaviour change |
 | 2 | partial | 2026-09-30: `r_sequence` branches documented. The author drafted them and they were corrected against A2 §2/§3.1/§4 and A0; the author still has to check them line by line. Waiting on: approval of the `likelihood_ratios` and `born` fields on `ScanEvent`; the A2 rows in `docs/derivations/README.md`. The body still raises `NotImplementedError` |
 | 3 | partial | `compare_r`, `plot_r_vs_analytic` and `plot_r_montecarlo` exist. `build_scan_events` and the three B3 test bodies still raise `NotImplementedError`. `build_scan_events` needs (mean, cov); `analyse` still assumes one track; `compare_r` to be checked for absolute error (D18) |
 | 3b | not started | option A wraps current code; B to D stubbed; waits on open question 3 for the choice |

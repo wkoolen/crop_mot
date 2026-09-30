@@ -5,9 +5,9 @@ The slot matters more than it looks: it fixes whether `Scan.pose` MEANS the true
 estimate of it. Deciding that after the filters exist would mean revisiting every filter's
 un-projection, so the distinction is written down now.
 
-pose_known = True is the thesis scope, not a phase-1 shortcut (decision D16): the robot
-carries RTK-GPS, so tracking static plants is mapping with known poses. The slot stays for
-a sensitivity experiment only.
+pose_known = True is a simplification for now (decision D16): the robot is assumed to carry
+RTK-GPS, so tracking static plants is mapping with known poses. It is revisited if RTK is
+not available on the Go2 setup. The slot stays for the heading-error sensitivity experiment.
 """
 
 from __future__ import annotations
@@ -44,14 +44,19 @@ def generate_path(cfg: PathConfig, rng_path: np.random.Generator) -> list[PoseSa
     yaw_wobble_std / xy_noise_std are ignored. This is the assumption B2 and the A2 closed
     form rely on.
 
-    Known pose is the thesis scope (decision D16): the robot carries RTK-GPS. With static
-    plants the problem is then mapping with known poses - no filter carries a pose state,
-    and the path only decides what is in view, through p_D(x, pose). The bound to state
-    alongside it: RTK gives position to about a centimetre, but heading comes from another
-    sensor, and one degree of heading error moves a detection at 4 m by about 7 cm, against
-    a measurement noise of sigma = 0.2 m.
+    Known pose is a simplification for now (decision D16, confirmed by the author on
+    2026-09-30): the robot is assumed to carry RTK-GPS. It is revisited if RTK is not
+    available on the Go2 setup. With static plants the problem is then mapping with known
+    poses - no filter carries a pose state, and the path only decides what is in view,
+    through p_D(x, pose). The bound to state alongside it: RTK gives position to about a
+    centimetre, but heading comes from another sensor, and one degree of heading error
+    moves a detection at 4 m by about 7 cm, against a measurement noise of sigma = 0.2 m.
+    A heading bias moves every detection in a scan the same way and does not average out
+    over scans, so its effect is measured (with NEES) in a sensitivity experiment rather
+    than assumed away.
 
-    EXTENSION SLOT, cfg.pose_known = False, kept as a sensitivity experiment only (D16): the reported pose is the true pose perturbed by
+    EXTENSION SLOT, cfg.pose_known = False, kept for that sensitivity experiment only
+    (D16): the reported pose is the true pose perturbed by
     N(0, yaw_wobble_std^2) in heading and N(0, xy_noise_std^2) in position - gait-induced
     odometry error on a quadruped. Nothing downstream changes shape: detections are still
     generated from the TRUE pose and the filter still un-projects with the REPORTED one, so
