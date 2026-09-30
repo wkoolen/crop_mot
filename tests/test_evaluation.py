@@ -20,6 +20,7 @@ from crop_mot.analysis.evaluation import (
     nees_band,
     scan_views,
 )
+from crop_mot.runner.analyse import ANY_FILTER_PLOTS, analyse_run
 from crop_mot.runner.run_dir import RunDir
 from crop_mot.runner.track import track_from_config
 from crop_mot.sensor.record import read_labels
@@ -83,3 +84,10 @@ def test_plants_in_view_are_the_simulators_visible_plants(bank_run: RunDir) -> N
         [len(scan.visible_ids) for scan in labels]
     for view in views:
         assert all(track.r > 0.0 for track in view.tracks)
+
+
+def test_any_filter_figures_render_for_the_bank(bank_run: RunDir) -> None:
+    """Every step-5 figure renders from the run folder alone. [B4, step 5]"""
+    analyse_run(bank_run, plots=list(ANY_FILTER_PLOTS))
+    for name in ANY_FILTER_PLOTS:
+        assert (bank_run.plots / f"{name}.png").stat().st_size > 0

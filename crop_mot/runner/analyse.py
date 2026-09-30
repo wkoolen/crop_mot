@@ -25,8 +25,11 @@ from crop_mot.analysis.montecarlo import (
 from crop_mot.analysis.plots import (
     animate_hypotheses,
     load_run_folder_config,
+    plot_cardinality,
     plot_counts,
+    plot_gospa,
     plot_hypotheses,
+    plot_nees,
     plot_r_montecarlo,
     plot_r_vs_analytic,
     plot_r_vs_k,
@@ -38,7 +41,13 @@ from crop_mot.runner.run_dir import RunDir
 
 # Every plot `analyse` knows how to draw, as named in the config's `analysis.plots`.
 PLOT_NAMES = ("scene", "counts", "r_vs_k", "hypotheses", "hypotheses_anim", "r_vs_analytic",
-              "r_montecarlo")
+              "r_montecarlo", "cardinality", "gospa", "nees")
+# The step-5 figures that work for any filter: each reads only (run, filter_name).
+ANY_FILTER_PLOTS = {
+    "cardinality": plot_cardinality,
+    "gospa": plot_gospa,
+    "nees": plot_nees,
+}
 # The ones a simulate-only run folder (no filter, no estimates) can draw.
 SCENARIO_PLOTS = ("scene", "counts")
 # The ones built on the A2 closed form, which assumes multiplicity "single".
@@ -120,8 +129,10 @@ def analyse_run(run: RunDir, plots: Sequence[str] | None = None,
             animate_hypotheses(run, filter_name, run.plots / "hypotheses.gif")
         elif name == "r_vs_analytic":
             _cross_check(run, cfg)
-        else:
+        elif name == "r_montecarlo":
             _monte_carlo(run, cfg, out)
+        else:
+            ANY_FILTER_PLOTS[name](run, filter_name, out)
 
 
 def _cross_check(run: RunDir, cfg: RunConfig) -> None:

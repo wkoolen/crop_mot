@@ -21,8 +21,19 @@ from matplotlib.colors import to_rgba
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from matplotlib.patches import Ellipse, Patch, Wedge
+from matplotlib.ticker import MaxNLocator
 
 from crop_mot.analysis.counts import scan_counts, weed_origin
+from crop_mot.analysis.evaluation import (
+    GOSPA_C,
+    GOSPA_P,
+    R_CONF,
+    cardinality,
+    gospa_series,
+    nees,
+    nees_band,
+    scan_views,
+)
 from crop_mot.analysis.estimates_log import (
     TrackLifetime,
     r_trajectory,
@@ -400,6 +411,127 @@ def plot_r_montecarlo(result: MonteCarloResult, r_ref: np.ndarray | None, out: P
     ax.set_ylabel("existence probability r")
     ax.set_title("Monte-Carlo mean r of the first track (descriptive)", color=INK, fontsize=11)
     ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), frameon=False, fontsize=9)
+    return _save(fig, out)
+
+
+def _time_axis(ax, n_scans: int) -> None:
+    ax.set_xlim(-0.5, n_scans - 0.5)
+    ax.set_xlabel("scan k")
+
+
+def plot_cardinality(run: RunDir, filter_name: str, out: Path) -> Path:
+    """Expected number of tracks in view against plants in view (D21). [B4, step 5]
+
+    Sum of r over the tracks whose mean is in view, and the number of true plants in view,
+    decided by the same FOV function on both sides. Reads only the run folder, so it works
+    for any filter.
+
+    Args:
+        run: the run folder.
+        filter_name: which estimates log to read.
+        out: destination PNG path.
+
+    Returns:
+        The path written.
+    """
+    count = cardinality(scan_views(run, filter_name))
+    k = np.arange(len(count.sum_r))
+
+    fig, (ax,) = _new_figure()
+    ax.plot(k, count.n_plants, color=INK, linewidth=2.0, drawstyle="steps-mid",
+            label="plants in view (truth)")
+    ax.plot(k, count.sum_r, color=SERIES_1, linewidth=2.0, solid_joinstyle="round",
+            solid_capstyle="round", label="sum of r, tracks in view")
+    _time_axis(ax, len(k))
+    ax.set_ylim(bottom=0)
+    ax.set_ylabel("number of objects")
+    ax.set_title(f"Cardinality in view, {filter_name}", color=INK, fontsize=11)
+    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), frameon=False, fontsize=9)
+    return _save(fig, out)
+
+
+def plot_gospa(run: RunDir, filter_name: str, out: Path) -> Path:
+    """GOSPA over time, and its split into localisation, missed and false (D31). [B4, step 5]
+
+    Top: the GOSPA distance per scan, between the confirmed tracks in view (r > r_conf)
+    and the plants in view. Bottom: GOSPA^p stacked from its three parts - the assigned
+    pairs' d^p, c^p / 2 per missed plant and c^p / 2 per false track - which add up to
+    the top curve raised to p.
+
+    Args:
+        run: the run folder.
+        filter_name: which estimates log to read.
+        out: destination PNG path.
+
+    Returns:
+        The path written.
+    """
+    results = gospa_series(scan_views(run, filter_name))
+    k = np.arange(len(results))
+    half = GOSPA_C**GOSPA_P / 2.0
+    parts = [
+        (np.array([r.localisation for r in results]), SERIES_1, "localisation, assigned pairs"),
+        (half * np.array([r.n_missed for r in results]), SERIES_2, "missed plants"),
+        (half * np.array([r.n_false for r in results]), SERIES_3, "false tracks"),
+    ]
+
+    fig, (ax, ax_parts) = _new_figure(n_rows=2, height=5.2, height_ratios=[1.0, 1.3])
+    ax.plot(k, [r.distance for r in results], color=INK, linewidth=2.0)
+    ax.set_ylim(bottom=0)
+    ax.set_ylabel("GOSPA [m]")
+    ax.set_title(f"GOSPA in view, {filter_name} (r > {R_CONF:g}, c = {GOSPA_C:g} m)", color=INK,
+                 fontsize=11)
+
+    ax_parts.stackplot(k, [values for values, _, _ in parts],
+                       colors=[colour for _, colour, _ in parts],
+                       labels=[label for _, _, label in parts],
+                       edgecolor=SURFACE, linewidth=1.0)
+    ax_parts.set_ylim(bottom=0)
+    ax_parts.set_ylabel(f"GOSPA^{GOSPA_P:g} [m^{GOSPA_P:g}]")
+    _time_axis(ax_parts, len(k))
+    ax_parts.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), frameon=False, fontsize=9)
+    return _save(fig, out)
+
+
+def plot_nees(run: RunDir, filter_name: str, out: Path) -> Path:
+    """Average NEES of the matched confirmed tracks, against its 95 % band. [B4, step 5]
+
+    The check on the Gaussian part that B3's existence check cannot give: an average above
+    the band means the reported covariances are too small (overconfident), below it too
+    large. Pairs are GOSPA's assignment (D31); scans without a pair leave a gap. The lower
+    panel shows how many pairs each scan averages, since the band narrows as that grows.
+
+    Args:
+        run: the run folder.
+        filter_name: which estimates log to read.
+        out: destination PNG path.
+
+    Returns:
+        The path written.
+    """
+    views = scan_views(run, filter_name)
+    error = nees(views, gospa_series(views))
+    lower, upper = nees_band(error.n_pairs, error.dim)
+    k = np.arange(len(error.mean_nees))
+
+    fig, (ax, ax_n) = _new_figure(n_rows=2, height=5.2, height_ratios=[2.0, 1.0])
+    ax.fill_between(k, lower, upper, color=MUTED, alpha=0.18, linewidth=0, step="mid",
+                    label=f"95 % band, chi-square({error.dim} n) / n")
+    ax.axhline(error.dim, color=MUTED, linewidth=1.0, label=f"expected value {error.dim}")
+    ax.plot(k, error.mean_nees, color=SERIES_1, linewidth=2.0, marker="o", markersize=4,
+            label="average NEES")
+    if np.any(error.n_pairs > 0):
+        ax.set_yscale("log")
+    ax.set_ylabel("NEES")
+    ax.set_title(f"NEES of confirmed tracks matched to plants, {filter_name}", color=INK,
+                 fontsize=11)
+    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), frameon=False, fontsize=9)
+
+    ax_n.plot(k, error.n_pairs, color=INK_SECONDARY, linewidth=2.0, drawstyle="steps-mid")
+    ax_n.set_ylim(bottom=0)
+    ax_n.yaxis.set_major_locator(MaxNLocator(integer=True))
+    ax_n.set_ylabel("pairs n")
+    _time_axis(ax_n, len(k))
     return _save(fig, out)
 
 
