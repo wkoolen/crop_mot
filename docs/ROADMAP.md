@@ -660,8 +660,8 @@ Carry these until they are decided, then move each answer into DECISIONS.md.
 Questions 3 to 6 were answered by Claude at the author's request on 2026-09-30 ("keep
 everything as documented and build complexity brick by brick"); 7 to 12 stay open until
 their steps.
-7. The detection `label` field, the confusion matrix config, and the derivation for the
-   imperfect classifier (step 8b).
+7. ~~The detection `label` field, the confusion matrix config~~ (decided, D22), and the
+   derivation for the imperfect classifier (step 8b): still open, the author's.
 8. The prior r_0 per slot, and how the simulator places missing plants (step 8c).
 9. A constant yaw-bias slot in `world/path.py` (step 8d).
 10. The output rule for MHT and PMBM: best global hypothesis or marginal (§2, step 16).
@@ -699,7 +699,7 @@ the commit of the step named; the number is reserved so parallel sessions do not
 | 6 | done | 2026-09-30: `compare --run DIR --filters ...` runs the filters on one run folder (`track_all_filters`), composes every figure side by side (plots/compare_<plot>.png) and writes mean GOSPA, NEES-in-band share and median update time per filter to metrics.json (D37). bernoulli and a one-seed bank agree exactly, as D12 requires |
 | 7 | done | 2026-09-30: `tests/test_figure_contract.py` renders every `ANY_FILTER_PLOTS` figure for every `FILTERS` entry (2 x 6 today), parametrised over both (D38). The "not applicable" panel comes with the first filter that needs it; the B2/B3 figures are Bernoulli-specific and outside the contract; the association figure stays deferred (D30) |
 | 8a | done | 2026-09-30: `filter.plan` + `birth: null` start the bank from the plan's N slots at r = 1 (D39); configs `b4_known_n_bank{,_weeds}.yaml`; failure modes from the labels via `gate_contents` (D40). Seed 42: 70 slots, mean GOSPA 0.24 m, NEES in band 98 % of scans, 24 ms per scan; a neighbour's detection in 91 % of gates, clutter 19 %, weeds 9 % (weeds config), no plant pulled - a 3.6 cm prior moves a slot about 1 cm per wrong association. Scaling with the plan (row length 6-48 m): 13-88 ms median per scan, slope 0.92 against N (D36): cost grows with total N, so the p_D = 0 skip of 4c is worth testing. Not yet: the known-N NEES rule (track i against plant i) and multi-seed shares |
-| 8b | not started | interface change; first version is the perfect classifier |
+| 8b | done | 2026-09-30: `Detection.label` from a confusion matrix (`sensor.classifier`, default perfect, own RNG stream: truth and z unchanged); `filter.assumed_classifier` (perfect only) drops weed-labelled detections from plant gates; config `b4_known_n_bank_labels.yaml` (D22). Seed 42: weed returns in gates 9.2 % -> 0 %, GOSPA 0.249 -> 0.244 m. The imperfect classifier waits on the label-factor derivation (open question 7) |
 | 8c | not started | expected to show the bank's failure on empty slots |
 | 8d | not started | stub only; waits on NEES (step 5) for the body |
 | 9 | not started | table structure fixed in step 9 |

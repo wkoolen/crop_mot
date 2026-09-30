@@ -234,6 +234,44 @@ class MultiplicityConfig:
     extent_std: float | None = None
 
 
+ORIGINS = ("plant", "weed", "clutter")
+CLASS_LABELS = ("plant", "weed")
+
+
+@dataclass(frozen=True)
+class ClassifierConfig:
+    """The detector's class labels, as a confusion matrix P(label | origin). [B4, step 8b]
+
+    The simulator draws each detection's label from the row of its true origin (decision
+    D22). The same type is the filter's `assumed_classifier`, what it believes, as
+    `assumed_sensor` is for p_D. In the YAML, one row per origin, each summing to 1:
+
+        classifier:
+          plant:   {plant: 1.0, weed: 0.0}
+          weed:    {plant: 0.0, weed: 1.0}
+          clutter: {plant: 1.0, weed: 0.0}
+
+    The default is that perfect classifier: plants and weeds are labelled what they are,
+    and clutter is labelled "plant", so it still reaches plant tracks as a false positive.
+
+    Attributes:
+        weed_given: P(label = "weed" | origin) for each origin in ORIGINS; the "plant"
+            column is one minus it.
+    """
+
+    weed_given: tuple[tuple[str, float], ...] = (("plant", 0.0), ("weed", 1.0),
+                                                 ("clutter", 0.0))
+
+    def p_weed(self, origin: str) -> float:
+        """P(label = "weed" | origin)."""
+        return dict(self.weed_given)[origin]
+
+    @property
+    def perfect(self) -> bool:
+        """Whether this is the default perfect classifier."""
+        return self.weed_given == ClassifierConfig().weed_given
+
+
 @dataclass(frozen=True)
 class SensorConfig:
     """The TRUTH detector used by the simulator. [B1]
@@ -248,10 +286,14 @@ class SensorConfig:
         lambda_FA: expected number of clutter detections per scan (Poisson mean).
         measurement: measurement model and noise.
         multiplicity: detections per plant per scan. Optional in the YAML, default "single".
-        weed_detection: how often a visible weed is reported as a plant, in the same format
-            as `detection`. Required when the world has weeds and refused otherwise
-            (decision D15). The filter's assumed sensor has no counterpart, so a scenario
-            with weeds is a model-mismatch experiment.
+        weed_detection: how often a visible weed is detected, in the same format as
+            `detection`. Required when the world has weeds and refused otherwise (decision
+            D15). The filter's assumed sensor has no counterpart, so a scenario with weeds
+            is a model-mismatch experiment. Before class labels a detection was always a
+            plant candidate, so "detected" meant "reported as a plant"; now its label comes
+            from `classifier`.
+        classifier: the class-label confusion matrix (roadmap step 8b, D22). Optional in
+            the YAML, default the perfect classifier.
     """
 
     fov: FieldOfView
@@ -260,6 +302,7 @@ class SensorConfig:
     measurement: MeasurementConfig
     multiplicity: MultiplicityConfig = MultiplicityConfig()
     weed_detection: DetectionConfig | None = None
+    classifier: ClassifierConfig = ClassifierConfig()
 
 
 @dataclass(frozen=True)
@@ -441,6 +484,11 @@ class FilterConfig:
         prune: component deletion. Optional in the YAML, default off (r_min = 0).
         plan: the planting plan, whose slots are the initial tracks of a known-N map
             (roadmap step 8a); None, the default, for no plan. Optional in the YAML.
+        assumed_classifier: the class-label confusion matrix the filter believes
+            (roadmap step 8b, D22), as `assumed_sensor` is for p_D; None, the default,
+            means the filter ignores labels, as every filter did before them. Only the
+            perfect classifier is implemented: plant tracks then drop weed-labelled
+            detections. Optional in the YAML.
         p_D_evaluation: how p_D is evaluated for a Gaussian track; a key into
             `crop_mot.filters.detection_prob.PD_EVALUATIONS`. Optional in the YAML, default
             "at_mean" (roadmap step 3b, decision D27).
@@ -457,6 +505,7 @@ class FilterConfig:
     prune: PruneConfig = PruneConfig()
     p_D_evaluation: str = "at_mean"
     plan: PlanConfig | None = None
+    assumed_classifier: ClassifierConfig | None = None
 
 
 # --------------------------------------------------------------------------------------
@@ -771,7 +820,7 @@ def _parse_multiplicity(raw: Any, where: str) -> MultiplicityConfig:
 
 def _parse_sensor(raw: Any, where: str) -> SensorConfig:
     _check_keys(raw, where, required={"fov", "detection", "lambda_FA", "measurement"},
-                optional={"multiplicity", "weed_detection"})
+                optional={"multiplicity", "weed_detection", "classifier"})
     detection = _parse_detection(raw["detection"], f"{where}.detection")
     multiplicity = (_parse_multiplicity(raw["multiplicity"], f"{where}.multiplicity")
                     if "multiplicity" in raw else MultiplicityConfig())
@@ -788,7 +837,25 @@ def _parse_sensor(raw: Any, where: str) -> SensorConfig:
         multiplicity=multiplicity,
         weed_detection=(_parse_detection(raw["weed_detection"], f"{where}.weed_detection")
                         if "weed_detection" in raw else None),
+        classifier=(_parse_classifier(raw["classifier"], f"{where}.classifier")
+                    if "classifier" in raw else ClassifierConfig()),
     )
+
+
+def _parse_classifier(raw: Any, where: str) -> ClassifierConfig:
+    """A confusion matrix {origin: {plant: p, weed: q}}, every row summing to 1."""
+    _check_keys(raw, where, required=set(ORIGINS))
+    weed_given = []
+    for origin in ORIGINS:
+        row = raw[origin]
+        _check_keys(row, f"{where}.{origin}", required=set(CLASS_LABELS))
+        plant = _as_float(row["plant"], f"{where}.{origin}.plant")
+        weed = _as_float(row["weed"], f"{where}.{origin}.weed")
+        if min(plant, weed) < 0.0 or abs(plant + weed - 1.0) > 1e-9:
+            raise ValueError(f"{where}.{origin}: expected probabilities summing to 1, "
+                             f"got plant {plant}, weed {weed}")
+        weed_given.append((origin, weed))
+    return ClassifierConfig(weed_given=tuple(weed_given))
 
 
 def _parse_scenario(raw: Any, where: str) -> ScenarioConfig:
@@ -815,7 +882,8 @@ def _parse_filter(raw: Any, where: str) -> FilterConfig:
     _check_keys(raw, where,
                 required={"kind", "motion", "measurement", "assumed_sensor", "birth",
                           "survival", "gate"},
-                optional={"collapse", "prune", "p_D_evaluation", "plan"})
+                optional={"collapse", "prune", "p_D_evaluation", "plan",
+                          "assumed_classifier"})
 
     motion = raw["motion"]
     _check_keys(motion, f"{where}.motion", required={"kind"}, optional={"q"})
@@ -899,6 +967,9 @@ def _parse_filter(raw: Any, where: str) -> FilterConfig:
         p_D_evaluation=_as_str(raw.get("p_D_evaluation", "at_mean"),
                                f"{where}.p_D_evaluation"),
         plan=plan,
+        assumed_classifier=(_parse_classifier(raw["assumed_classifier"],
+                                              f"{where}.assumed_classifier")
+                            if "assumed_classifier" in raw else None),
     )
 
 

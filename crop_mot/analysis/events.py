@@ -20,7 +20,7 @@ import numpy as np
 
 from crop_mot.analysis.analytic import ScanEvent
 from crop_mot.analysis.estimates_log import ScanEstimates
-from crop_mot.association.gating import chi2_threshold, gate_measurements
+from crop_mot.association.gating import chi2_threshold, gate_measurements, without_weed_labels
 from crop_mot.config import FilterConfig
 from crop_mot.filters.detection_prob import PD_EVALUATIONS
 from crop_mot.filters.kalman import kf_predict, log_predicted_likelihood, predicted_measurement
@@ -223,7 +223,8 @@ def gated_detection_indices(
     """Indices of this scan's detections inside the track's gate, as the filter gates them.
 
     Uses the filter's measurement model and chi-square threshold, and the scan's REPORTED
-    pose, so the count matches what the filter saw.
+    pose, so the count matches what the filter saw; with an assumed classifier, weed-
+    labelled detections are dropped as the filter drops them (roadmap step 8b, D22).
 
     Serves: [B2] the r-vs-k plot's gated-detection markers; [B3] ScanEvent.n_gated.
 
@@ -239,4 +240,7 @@ def gated_detection_indices(
     z_hat, S = predicted_measurement(mean, cov, measurement, scan.pose)
     Z = np.array([d.z for d in scan.detections]).reshape(-1, measurement.dim_z)
     threshold = chi2_threshold(cfg.gate.chi2_prob, measurement.dim_z)
-    return gate_measurements(Z, z_hat, S, threshold)
+    gated = gate_measurements(Z, z_hat, S, threshold)
+    if cfg.assumed_classifier is not None:
+        gated = without_weed_labels(gated, scan.detections)
+    return gated

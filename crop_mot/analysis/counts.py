@@ -66,6 +66,16 @@ def weed_origin(label: ScanLabels) -> tuple[int | None, ...]:
     return label.weed_origin or (None,) * len(label.origin)
 
 
+def origin_kinds(label: ScanLabels) -> tuple[str, ...]:
+    """Each detection's true origin kind: "plant", "weed" or "clutter". [B1, D15/D22]
+
+    The rows of the class-label confusion matrix (`config.ClassifierConfig`): a weed
+    detection has origin None like Poisson clutter, and `weed_origin` tells them apart.
+    """
+    return tuple("plant" if origin is not None else "weed" if weed is not None else "clutter"
+                 for origin, weed in zip(label.origin, weed_origin(label)))
+
+
 def scan_counts(labels: list[ScanLabels]) -> list[ScanCounts]:
     """Tally each scan's labels. [B1]
 

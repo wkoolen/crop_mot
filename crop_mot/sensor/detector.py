@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from crop_mot.config import MultiplicityConfig
+from crop_mot.config import ClassifierConfig, MultiplicityConfig
 from crop_mot.sensor.fov import in_fov, sample_uniform_in_fov
 from crop_mot.sensor.sensor_model import SensorModel
 from crop_mot.types import Detection, Pose2D, Scan, ScanLabels
@@ -30,6 +30,8 @@ def sample_scan(
     rng_multi: np.random.Generator | None = None,
     weed_model: SensorModel | None = None,
     rng_weeds: np.random.Generator | None = None,
+    classifier: ClassifierConfig = ClassifierConfig(),
+    rng_classifier: np.random.Generator | None = None,
 ) -> tuple[Scan, ScanLabels]:
     """Draw one scan of detections from the truth.
 
@@ -97,6 +99,10 @@ def sample_scan(
         weed_model: the TRUTH sensor model for weeds (built from `sensor.weed_detection`),
             supplying the weeds' p_D. Required when the truth has weeds.
         rng_weeds: the "weed_detection" substream. Required when the truth has weeds.
+        classifier: the class-label confusion matrix (roadmap step 8b, D22); default the
+            perfect classifier.
+        rng_classifier: the "classifier" substream, one uniform per detection. Required
+            unless every label is certain (all entries 0 or 1).
 
     Returns:
         A tuple (scan, labels):
@@ -168,12 +174,24 @@ def sample_scan(
             weed_list.append(weed_id)
 
     order = sorted(range(len(z_list)), key=lambda i: tuple(z_list[i]))
+    # The class label of each detection, drawn from its true origin's row of the confusion
+    # matrix (D22): one uniform per detection, in the sorted order, from its own stream, so
+    # the labels change nothing else and a perfect classifier is deterministic.
+    class_labels = []
+    for i in order:
+        kind = "plant" if origin_list[i] is not None else (
+            "weed" if weed_list[i] is not None else "clutter")
+        u = rng_classifier.random() if rng_classifier is not None else 0.5
+        if rng_classifier is None and classifier.p_weed(kind) not in (0.0, 1.0):
+            raise ValueError("an imperfect classifier needs the rng_classifier substream")
+        class_labels.append("weed" if u < classifier.p_weed(kind) else "plant")
     reported_pose = truth.poses[k].reported
     scan = Scan(
         k=k,
         t=t,
         pose=reported_pose,
-        detections=tuple(Detection(z=z_list[i]) for i in order),
+        detections=tuple(Detection(z=z_list[i], label=label)
+                         for i, label in zip(order, class_labels)),
     )
     labels = ScanLabels(
         k=k,

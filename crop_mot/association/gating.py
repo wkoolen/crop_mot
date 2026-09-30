@@ -54,6 +54,23 @@ def mahalanobis_sq(z: np.ndarray, z_hat: np.ndarray, S: np.ndarray) -> float:
     return float(d @ np.linalg.solve(S, d))
 
 
+def without_weed_labels(indices: np.ndarray, detections) -> np.ndarray:
+    """The gated indices whose detection is not labelled "weed". [B4, roadmap step 8b]
+
+    What a plant track keeps when the filter assumes the perfect classifier (decision
+    D22): a weed-labelled detection is never associated with it, even inside its gate.
+    Shared by the filter and the analysis that rebuilds its gates, so both drop the same.
+
+    Args:
+        indices: gated detection indices, increasing.
+        detections: the scan's detections, which `indices` point into.
+
+    Returns:
+        The indices that remain, still increasing.
+    """
+    return np.array([i for i in indices if detections[i].label != "weed"], dtype=int)
+
+
 def gate_measurements(
     measurements: np.ndarray, z_hat: np.ndarray, S: np.ndarray, threshold: float
 ) -> np.ndarray:

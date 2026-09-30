@@ -77,19 +77,24 @@ class FieldOfView:
 
 @dataclass(frozen=True)
 class Detection:
-    """One measurement z reported by the black-box detector. [B1]
+    """One measurement z reported by the black-box detector, with its class label. [B1/B4]
 
-    Carries NO origin label: whether this came from a plant or from clutter is recorded
-    separately in `ScanLabels` and never reaches a filter. That separation is the whole
-    reason this class has a single field.
+    Carries NO origin: whether this came from a plant, a weed or clutter is recorded
+    separately in `ScanLabels` and never reaches a filter. The class label is different:
+    it is what the detector SAYS it saw (roadmap step 8b, decision D22), an output like z,
+    and it can be wrong - the simulator draws it from a confusion matrix
+    (`config.ClassifierConfig`).
 
     Attributes:
         z: shape (dim_z,). In phase 1 this is a world-frame xy position in metres, because
             the detector is assumed to have already un-projected through the known pose -
             see `crop_mot.sensor.models.LinearGaussianXY` for the assumption.
+        label: "plant" or "weed", the detector's class label. Defaults to "plant", which
+            is what every detection was before labels existed.
     """
 
     z: np.ndarray
+    label: str = "plant"
 
 
 @dataclass(frozen=True)

@@ -73,7 +73,8 @@ def simulate(cfg: ScenarioConfig, run: RunDir, summary: bool = True) -> None:
         scan, label = sample_scan(truth, sample.true, k, sample.t, model,
                                   streams["detection"], streams["clutter"],
                                   cfg.sensor.multiplicity, streams["multiplicity"],
-                                  weed_model, streams["weed_detection"])
+                                  weed_model, streams["weed_detection"],
+                                  cfg.sensor.classifier, streams["classifier"])
         scans.append(scan)
         labels.append(label)
 

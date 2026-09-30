@@ -23,7 +23,8 @@ from crop_mot.types import Detection, Pose2D, Scan, ScanLabels
 def write_detections(path: Path, scans: list[Scan]) -> None:
     """Write all scans to detections.jsonl - the filter's only input.
 
-    One JSON object per scan, holding k, t, the reported pose, and the list of z vectors.
+    One JSON object per scan, holding k, t, the reported pose, the list of z vectors and
+    the list of their class labels (roadmap step 8b, D22) - what the detector says it saw.
     Deliberately contains no origin information of any kind.
 
     Serves: [B1] run-folder output; [B2/B4] the shared input that makes filter comparison fair.
@@ -39,6 +40,7 @@ def write_detections(path: Path, scans: list[Scan]) -> None:
             "t": scan.t,
             "pose": asdict(scan.pose),
             "z": [detection.z for detection in scan.detections],
+            "label": [detection.label for detection in scan.detections],
         })
     write_jsonl(path, records)
 
@@ -52,11 +54,14 @@ def read_detections(path: Path) -> list[Scan]:
         path: source detections.jsonl.
 
     Returns:
-        The scans in file order.
+        The scans in file order. A file written before class labels has no "label" list;
+        its detections read back labelled "plant", which is what they were to a filter.
     """
     scans = []
     for record in read_jsonl(path):
-        detections = tuple(Detection(z=np.asarray(z, dtype=float)) for z in record["z"])
+        labels = record.get("label", ["plant"] * len(record["z"]))
+        detections = tuple(Detection(z=np.asarray(z, dtype=float), label=label)
+                           for z, label in zip(record["z"], labels))
         scans.append(Scan(k=record["k"], t=record["t"], pose=Pose2D(**record["pose"]),
                           detections=detections))
     return scans

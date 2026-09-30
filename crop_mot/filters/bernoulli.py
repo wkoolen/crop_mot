@@ -16,7 +16,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from crop_mot.association.gating import chi2_threshold, gate_measurements
+from crop_mot.association.gating import chi2_threshold, gate_measurements, without_weed_labels
 from crop_mot.config import FilterConfig
 from crop_mot.filters.base import BirthModel, SurvivalModel, TrackingFilter
 from crop_mot.filters.birth import NoBirth, build_single_birth
@@ -79,6 +79,9 @@ class BernoulliFilter(TrackingFilter[BernoulliState]):
             probability and dim_z.
         p_D_evaluation: how p_D enters the miss weight, the detection branches and the
             missed-branch moments (see crop_mot.filters.detection_prob); AtMean by default.
+        drop_weed_labels: whether weed-labelled detections are dropped from the gate
+            (the perfect assumed classifier, roadmap step 8b, D22). False by default:
+            labels ignored, as before they existed.
         name: "bernoulli".
     """
 
@@ -90,6 +93,7 @@ class BernoulliFilter(TrackingFilter[BernoulliState]):
     collapse: CollapseStrategy
     gate_chi2: float
     p_D_evaluation: PdEvaluation = AtMean()
+    drop_weed_labels: bool = False
     name: str = "bernoulli"
 
     def initial_state(self) -> BernoulliState:
@@ -215,6 +219,9 @@ class BernoulliFilter(TrackingFilter[BernoulliState]):
         z_hat, S = predicted_measurement(m, P, self.measurement, pose)
         Z = np.array([d.z for d in scan.detections]).reshape(-1, self.measurement.dim_z)
         gated = gate_measurements(Z, z_hat, S, self.gate_chi2)
+        if self.drop_weed_labels:
+            # A plant track never associates a weed-labelled detection (D22).
+            gated = without_weed_labels(gated, scan.detections)
 
         # Clutter intensity lambda_FA * c(z) at each gated detection [A0 §Measurement model].
         kappa = [lambda_FA * self.sensor.clutter_density(Z[i], pose) for i in gated]
@@ -295,7 +302,8 @@ def build_bernoulli(cfg: FilterConfig) -> BernoulliFilter:
         ValueError: if cfg.kind is not "bernoulli", or a referenced model kind is unknown,
             or a planting plan is configured (it lives in the bank), or pruning is configured (it lives in the bank filter; a single Bernoulli would
             have nothing to report after deleting its one component).
-        NotImplementedError: if the p_D evaluation is one of the stubbed options B to D.
+        NotImplementedError: if the p_D evaluation is one of the stubbed options B to D,
+            or the assumed classifier is not the perfect one.
     """
     if cfg.kind != "bernoulli":
         raise ValueError(f"build_bernoulli got filter kind {cfg.kind!r}")
@@ -311,6 +319,11 @@ def build_bernoulli(cfg: FilterConfig) -> BernoulliFilter:
     if cfg.collapse not in COLLAPSE_STRATEGIES:
         raise ValueError(f"unknown collapse {cfg.collapse!r}; "
                          f"available: {sorted(COLLAPSE_STRATEGIES)}")
+    if cfg.assumed_classifier is not None and not cfg.assumed_classifier.perfect:
+        raise NotImplementedError(
+            "an imperfect assumed classifier enters the association weights as a label "
+            "factor, which waits on the author's derivation (roadmap step 8b, open question 7)"
+        )
     if cfg.p_D_evaluation not in PD_EVALUATIONS:
         raise ValueError(f"unknown p_D_evaluation {cfg.p_D_evaluation!r}; "
                          f"available: {sorted(PD_EVALUATIONS)}")
@@ -326,4 +339,5 @@ def build_bernoulli(cfg: FilterConfig) -> BernoulliFilter:
         collapse=COLLAPSE_STRATEGIES[cfg.collapse](),
         gate_chi2=chi2_threshold(cfg.gate.chi2_prob, measurement.dim_z),
         p_D_evaluation=PD_EVALUATIONS[cfg.p_D_evaluation](),
+        drop_weed_labels=cfg.assumed_classifier is not None,
     )
