@@ -1,9 +1,21 @@
 # Roadmap B3 → B4: brief for the implementing agent
 
 Written 2026-09-30 in a design session with the author (Wessel), who approved the step
-order below. This file is the brief for an agent continuing the work in a fresh session: it
-holds the context, the standing assumptions, the plan and its progress. **Update the
-progress table (§8) at the end of every step.**
+order below. Revised the same day after an independent review; the author's decisions from
+that review are reserved as D16 to D24 (§7b). This file is the brief for an agent continuing
+the work in a fresh session: it holds the context, the standing assumptions, the plan and
+its progress. **Update the progress table (§8) at the end of every step.**
+
+**Purpose.** This roadmap builds the proof of concept for the graduation proposal. Its job
+is to help the author choose the approach for phase 2, and for a real quadruped in a real
+field. Every step should therefore produce evidence for that choice:
+
+- accuracy: GOSPA, association accuracy, missing plants found;
+- consistency: NEES, i.e. whether the reported covariances can be trusted;
+- cost per scan, against the scan period of 0.25 s;
+- how hard the method is to validate (does it reduce to something already checked?).
+
+A step that feeds none of these is a candidate to drop; raise it with the author.
 
 ## 0. Starting a session
 
@@ -15,84 +27,19 @@ progress table (§8) at the end of every step.**
    - `docs/derivations/README.md` and `docs/derivations/A2.md`;
    - `crop_mot/filters/README.md`.
 2. Run `git status`, `git log --oneline -10` and `python3 -m pytest tests -q -m "not slow"`.
-3. Report to the author: the state of the tree, which step in §8 is next (§0a first, while
-   it is open), and anything blocking it. **Start a step only after the author confirms it.** Several steps depend on
+3. Report to the author: the state of the tree, which step in §8 is next, and anything
+   blocking it. **Start a step only after the author confirms it.** Several steps depend on
    derivations only the author can write.
 
 **Precedence.** HANDOVER.md says "B4: do not implement". This roadmap lifts that one step at
 a time; everything else in HANDOVER.md stands. When this file was written, the weeds work
 (D15) was uncommitted on branch `b1-b3-implementation`. Check before assuming.
 
-## 0a. Next iteration (priority): fix the B3 interface
-
-The author made this the next iteration on 2026-09-30. Do it before anything else in §6.
-It unblocks steps 2 and 3, and through them the whole validation chain.
-
-**The problem.** The `r_sequence` docstring in `crop_mot/analysis/analytic.py` is now
-written: the author drafted it, and it was corrected against A2 §2, §3.1, §4 and A0 on
-2026-09-30. It needs two inputs that `ScanEvent` does not carry, and `build_scan_events`
-cannot compute them with its current signature:
-
-| Gap | Why the recursion needs it | Today |
-|---|---|---|
-| ℓ_i / κ_i for each gated detection | the one- and several-detection cases (A2 §3.1, A0) weigh "this object produced z_i" against "z_i is clutter" | only the count `n_gated` |
-| which scan is the birth scan | the birth case sets r = r_birth there, and r = 0 before it | nothing marks it |
-| the predicted covariance | gating and ℓ_i both need S = H P H^T + R | `build_scan_events` takes means only |
-
-**Proposed changes.** Confirm the names and semantics with the author at the start of the
-session, then implement.
-
-1. **`ScanEvent.likelihood_ratios: tuple[float, ...] = ()`.** One entry per gated
-   detection, in gate order: ℓ_i / κ_i = p_D N(z_i; ẑ, S) / (λ_FA c(z_i)).
-   - Evaluate it with the filter's *assumed* sensor, at the filter's predicted moments and
-     the scan's reported pose.
-   - Use the shared helpers in `filters/kalman.py` (`predicted_measurement`,
-     `log_predicted_likelihood`), as `filters/README.md` asks, so the linear algebra is
-     never a suspect.
-   - Invariant: `len(likelihood_ratios) == n_gated`, checked in `__post_init__`. Keep
-     `n_gated` for readability.
-2. **`ScanEvent.born: bool = False`.** True at exactly one scan: the first scan the track
-   appears in the estimates log (`track_lifetimes`).
-   - Take it from the log, not from the birth config, so it works for any birth model
-     (seeds today, the step-8 map and the step-13 birth later).
-   - Scans before the birth have `in_fov` False, `p_D` 0, `n_gated` 0, empty ratios and
-     `born` False; the reference returns r = 0 there.
-3. **`build_scan_events(detections_path, labels_path, cfg, track_moments_per_scan)`.**
-   `track_moments_per_scan` is a list of `(mean, cov) | None` per scan, exactly what
-   `predicted_track_moments` returns, replacing the means-only `track_mean_per_scan`.
-   - The birth scan follows from the moments: it is the scan before the first non-None
-     entry, which is the first scan the track is reported. If deriving it that way reads
-     less clearly than passing it explicitly, pass it and say why.
-   - For a pruned bank track, build the moments from the unpruned companion log (D14).
-4. **Record it as a decision** (next free D-number), in the `ScanEvent` and
-   `build_scan_events` docstrings, and in the commit message.
-
-**Scope, stated in the decision.** B3 then checks the existence recursion *given* the
-likelihoods. The Gaussian likelihood itself comes from the shared Kalman helpers that the
-filter also uses, so B3 does not independently check it. That is deliberate: the Kalman
-algebra is A1's, and `kalman.py` is its implementation.
-
-**Then, in the same iteration:**
-
-5. **Confirm the author has checked the `r_sequence` docstring against A2, line by line.**
-   It was corrected in a session that had read `filters/bernoulli.py`, so the independence
-   has to come from the author.
-6. **Implement the body of `r_sequence` from its docstring only.** Do not open
-   `filters/bernoulli.py` while doing so (§6 step 2).
-7. **Continue with step 3:** `analyse` routing and the three B3 tests.
-
-**Done when:**
-- `ScanEvent` has both fields, with the invariant checked;
-- `build_scan_events` is implemented with the new signature;
-- a unit test checks `likelihood_ratios` against a hand-computed value for one small
-  scan, and that `born` is True exactly once;
-- `test_constant_profile_is_the_special_case_of_the_general_recursion` passes;
-- all existing tests still pass.
-
 ## 1. Standing assumptions
 
-- **Pose known (RTK-GPS).** The robot's absolute pose is known, so `path.pose_known: true`
-  is part of the thesis scope, not a phase-1 shortcut (recorded as D16 in step 1).
+- **Pose known (RTK-GPS), as a simplification for now** (D16). The robot's absolute pose is
+  known, so `path.pose_known: true`. Whether the Go2 setup will have RTK is not yet
+  confirmed; if it does not, this assumption is revisited, not silently kept.
   - With static plants, the problem becomes *mapping with known poses*. No filter carries
     a pose state, the motion model is the identity, and all uncertainty is in
     association, existence and clutter.
@@ -100,13 +47,25 @@ algebra is A1's, and `kalman.py` is its implementation.
   - A bound to state alongside it: RTK gives position to about a centimetre, but heading
     comes from elsewhere. One degree of heading error moves a detection at 4 m by about
     7 cm, against σ = 0.2 m measurement noise.
-  - The yaw-wobble slot in `world/path.py` stays, as a sensitivity experiment only.
+  - The size of that error is not the main risk; its correlation is. A heading bias moves
+    every detection in a scan the same way, and a slowly varying bias does not average
+    out over scans. The 3.6 cm map prior (step 8a) is already tighter than 7 cm, so a
+    filter that ignores heading error becomes overconfident. Step 8d stubs the
+    experiment that measures this with NEES.
 - **Plants are static and permanent** (p_S = 1, `StaticTarget`).
-- **The thesis scope is "N known".** There are N plants whose positions come from the
-  planting plan, known to RTK precision. Weeds and clutter are unknown and come on top; to
-  the filter, both are false positives (step 8).
-- **"N unknown" is studied as the general case.** The known-N methods are limits of it,
-  and it is the case where phantom deletion (A2 §5) becomes visible.
+- **The thesis scope is "N bounded by the planting plan".** Each planned slot holds a plant
+  with prior probability r_0, at a position known to RTK precision (step 8c). "N known"
+  (r ≡ 1) is the limiting case: it is built first (step 8a) and it anchors the reduction
+  tests (D23).
+- **Weeds are labelled by the vision model** (D22). The detector will report a class label,
+  plant or weed. Plant tracks do not associate weed-labelled detections, even inside their
+  gate. The detector is stubbed as a confusion matrix (step 8b), so the false positives a
+  plant filter sees are Poisson clutter and weeds that were labelled "plant".
+  - Weed-labelled detections are kept, not thrown away: weeds may get their own map later.
+    That map is an "N unknown" problem (no plan for weeds), so it is the natural use of the
+    Phase 4 machinery.
+- **"N unknown" is studied as the general case.** The known-N and bounded-N methods are
+  limits of it, and it is the case where phantom deletion (A2 §5) becomes visible.
 
 ## 2. Three design rules
 
@@ -115,38 +74,64 @@ algebra is A1's, and `kalman.py` is its implementation.
    Figures read only the run folder: the estimates log, plus truth for evaluation. Every
    new method therefore gets every existing figure, and no figure may depend on one
    filter's config layout.
+   - Methods that keep several hypotheses (MHT, PMBM) need a rule for producing this list:
+     the best global hypothesis, or a marginal over hypotheses. The rule changes every
+     comparison, so it is a decision per method, recorded when the method is added.
+   - A figure may declare a filter *not applicable*: phantom lifetime for methods without
+     births, per-track figures for the PHD grid (it has no identities). It then renders a
+     labelled placeholder panel. The contract test (step 7) accepts a placeholder, not an
+     exception.
 2. **Every new method reproduces its parent.** Each new filter ships with at least one
    *reduction test*: under a restricting config it gives the same estimates as the simpler
-   method, on the same run folder.
+   method, on the same run folder. "The same" means equal within an absolute tolerance of
+   1e-12 on every r, mean and covariance entry (D18).
    - The precedent is D12: a one-seed unpruned bank equals the single Bernoulli filter
      (`tests/test_bernoulli_bank.py`).
    - The thesis claims the relationships in §3; these tests are the evidence for them.
 3. **One branch table, combined in different ways.** For each track, the update builds the
-   table of A2 §3.1: "missed", "z_i came from this track", "z_i is clutter". The methods
-   differ only in how they combine that table (A2 §3.2):
+   table of A2 §3.1: "does not exist", "exists but missed", "z_i came from this track",
+   "z_i is clutter", and, for methods with a Poisson part, "z_i is a new object". The
+   methods differ only in how they combine that table (A2 §3.2):
    - GNN selects one branch;
    - PDA, JPDA, JIPDA and PMB average over the branches;
    - MHT and PMBM keep several hypotheses alive.
 
-   The table is computed in one shared function (step 9) that every filter calls.
+   The table is computed in one shared function (step 9) that every filter calls. Its
+   structure is fixed in step 9 *before* any method that needs it is written, so it is not
+   refactored again.
 
 ## 3. Method map
 
 | | One object | Many objects, hard association | Many objects, averaged association | Many objects, several hypotheses kept |
 |---|---|---|---|---|
-| **N known** (r ≡ 1, no birth) | PDA | GNN (the baseline) | JPDA | MHT |
+| **N known** (r ≡ 1, no birth) | PDA | GNN (the baseline) | JPDA | MHT (fixed set of tracks) |
+| **N bounded** (r per slot, no birth) | Bernoulli per slot | | JIPDA without birth | |
 | **N unknown** (r, birth) | Bernoulli (= IPDA with moment matching) | GNN + M-of-N track logic | JIPDA ≈ PMB | PMBM |
 | **N unknown, no identities** | | | PHD grid (the "heatmap") | |
 
 Reductions to test:
 
 - **Unknown N → known N** (pin r = 1, turn birth off): Bernoulli → PDA, PMB → JPDA,
-  PMBM → MHT.
-- **Many objects → one object:** JPDA with one track = PDA; PMB with one object = Bernoulli.
+  PMBM → MHT. "MHT" here means MHT over a fixed set of tracks, without track initiation.
+- **Bounded N → known N** (r_0 = 1): the slot bank of step 8c → step 8a; JIPDA → JPDA.
+- **Many objects → one object:** JPDA with one track = PDA. PMB with one object and zero
+  Poisson intensity = Bernoulli with moment matching; the Bernoullis PMB creates from
+  detections then have r = 0 and must be dropped, not kept.
 - **JPDA with no overlapping gates** = a bank of independent PDAs.
-- **GNN with one track** = PDA with `KeepBestBranch`, up to ties. Both compare (1 − p_D)
-  against p_D N(z_i; ẑ, S) / κ_i.
-- **The PHD grid** is PMB's Poisson part.
+- **GNN with one track** = PDA with `KeepBestBranch`, up to ties. This holds only for the
+  GNN of step 11, whose cost matrix carries the same likelihood ratios: detection cost
+  −ln(p_D g(z_i)/κ_i), and one missed-detection column per track with cost −ln(1 − p_D).
+  A plain distance-based GNN does not reduce.
+- **The PHD grid without its detection term is PMB's Poisson part.** PMB updates the
+  undetected-object intensity only with the miss factor, D⁺(x) = (1 − p_D(x)) D(x),
+  because each detection creates a new Bernoulli instead. The full PHD grid agrees with it
+  only on scans with no detections.
+
+**Association marginals in reduction tests** (D19). Every reduction test that involves
+association marginals (JPDA, JIPDA, PMB) computes them by exact enumeration, on scenarios
+whose clusters are small enough for that. Approximate methods (Murty k-best, loopy belief
+propagation) are tested separately against exact enumeration on small clusters, with a
+tolerance that is its own decision.
 
 "GNN + M-of-N" appears for completeness only; it is not planned.
 
@@ -155,12 +140,17 @@ Reductions to test:
 - **Done means:**
   - tests are green;
   - the step's named test or figure exists;
-  - every choice made has a new row in the DECISIONS table (next free D-number);
+  - every choice made has a new row in the DECISIONS table (use the reserved number in
+    §7b if there is one, otherwise the next free D-number);
   - docstrings are updated;
   - there is one commit whose message states the decision.
 
-  Existing run outputs stay byte-identical unless a decision says otherwise; if they
-  change, the decision says so.
+  Existing run outputs stay equal within 1e-12 absolute (D18) unless a decision says
+  otherwise; if they change, the decision says so.
+- **Tests written before their code exists** are marked
+  `@pytest.mark.xfail(strict=True, reason="waits on step N")` (D24). The suite stays green,
+  and strict mode fails the moment the test starts passing, so the marker is removed in
+  the commit that makes it pass.
 - **Every new filter gets:**
   - a reduction test (§3);
   - a place in every figure (step 7's contract test enforces this);
@@ -170,9 +160,14 @@ Reductions to test:
   yourself. This matters most for anything a B3-style check compares against: deriving it
   from the code makes the check a tautology.
 - **Interface changes need the author's approval first.** Known candidates:
-  - a new `ScanEvent` field (step 2);
+  - new `ScanEvent` fields (step 2);
+  - (mean, cov) into `build_scan_events` (step 3);
+  - the p_D evaluation strategy (step 3b);
   - a timing log written by the runner (step 4c);
-  - a richer diagnostics channel for association weights (step 7).
+  - a richer diagnostics channel for association weights (step 7);
+  - a class label on detections, and an assumed confusion matrix (step 8b);
+  - a missing-plant rate in the scenario, and r_0 in the filter config (step 8c);
+  - a constant yaw-bias slot in `world/path.py` (step 8d).
 - **Author-only items:** every `TODO(human)` and `TODO(Wessel)`. Never fill them in.
 
 ## 5. Context numbers
@@ -180,20 +175,39 @@ Reductions to test:
 Back-of-envelope figures from 2026-09-30, for the `b1_two_rows*` scenarios.
 
 - **Clutter intensity.** The FOV area is 9.546 m², so κ = λ_FA c(z) = 2 / 9.546 ≈ 0.21 per m².
-- **Gate size.** The gate is χ² at 0.99 in 2D. Its radius is:
+- **Gate size.** The gate is χ² at 0.99 in 2D (threshold 9.21). Its radius is:
   - 0.61 m for a converged track (S ≈ R = 0.04 I);
-  - 1.21 m for a newborn track (init_cov 0.12 I).
+  - 1.21 m for a newborn track (init_cov 0.12 I, so S = 0.12 I + R = 0.16 I).
 
   Plants are 0.35 m apart within a row, so each detection falls inside three to four plant
   tracks' gates. The bank's independence approximation (D12) does not hold for the full
   field.
-- **How existence changes per scan**, for a converged track, in log-odds:
-  - about +1.78 for a detection;
-  - about −1.90 for an in-view miss (odds × 0.15).
+- **How existence changes per scan**, for a converged track, in log-odds. The first two
+  lines are the simple estimate; the rest add what falls in the gate. Filter p_D = 0.85
+  evaluated at the mean. Monte Carlo over 10⁵ scans per line, in-row neighbours only:
 
-  The break-even true detection rate is about 52 %. Plants are seen about 78 % of the time
-  (D11), so they confirm quickly. Weeds at weed p_D 0.5 hover (drift ≈ −0.06 per scan),
-  consistent with D15's measurements.
+  | Situation | Mean log-odds change per scan |
+  |---|---|
+  | detection, gate otherwise empty | about +1.8 |
+  | in-view miss, gate empty | −1.90 (odds × 0.15) |
+  | in-view miss, Poisson clutter in the gate (0.24 returns per gate on average) | about −1.33 |
+  | weed at weed p_D 0.5, gate empty | about −0.04 |
+  | weed at weed p_D 0.5, with clutter in the gate | about +0.30 |
+  | **empty map slot** between plants at ±0.35 m (seen 78 %), with clutter, bank | **about +1.29** |
+
+  Consequences:
+  - The break-even true detection rate is about 52 % with an empty gate, and about 42 %
+    once clutter is counted. Plants are seen about 78 % of the time (D11), so they confirm
+    quickly either way.
+  - Weeds hover only if the gate is empty. With clutter they drift up. This disagrees with
+    D15's measurement ("hover"). Before relying on either, check whether D15's weed tracks
+    had a larger covariance or a different clutter density (open question 12). With class
+    labels (D22), this line only applies to weeds labelled "plant".
+  - **An empty slot is kept alive by its neighbours.** Under the bank's independence
+    approximation, the detections of the two neighbour plants fall in the empty slot's gate
+    and raise its r by about 1.3 per scan. The bank therefore cannot find missing plants at
+    0.35 m spacing. JIPDA (step 12 with existence) should, because it lets each neighbour's
+    detection be explained by the neighbour. This is the key comparison of step 8c.
 - **Track count.** About 70 plants in the 12 m two-row field, so figures must handle tens
   of tracks, not five.
 - **Heatmap lesson** (for step 14). Two ways to build a heatmap, each with a flaw:
@@ -211,7 +225,9 @@ Back-of-envelope figures from 2026-09-30, for the `b1_two_rows*` scenarios.
 ### Phase 1: finish B3
 
 **Step 1. Record the RTK assumption (D16).** Add a decision row and update the docstring of
-`world/path.py::generate_path`. No behaviour change.
+`world/path.py::generate_path`. No behaviour change. The row says: known pose is a
+simplification for now, confirmed by the author on 2026-09-30; it is revisited if RTK is not
+available on the Go2 setup; heading error is studied in step 8d.
 
 **Step 2. Turn A2 into `r_sequence`. AUTHOR ONLY.** This is the `TODO(human)` in
 `crop_mot/analysis/analytic.py`. Point out two gaps in `ScanEvent` to the author:
@@ -240,14 +256,16 @@ tautology.
   takes `track_mean_per_scan` (means only), but gating and the likelihood both need the
   predicted covariance too. Pass the (mean, cov) pairs that `predicted_track_moments`
   already returns. This is an interface change; raise it with the author.
+- `compare_r` compares with an **absolute** error on r (D18). r saturates near 1, so a
+  relative error on 1 − r, or a log-odds error, would blow up without meaning anything.
 - Route `r_vs_analytic` through `runner/analyse.py`, and write the comparison to
   `metrics.json`. While in `analyse`, remove its one-track, seeded-birth assumptions:
   - loop over all tracks instead of `_first_track_id`;
   - make the scene's scan an option instead of `cfg.filter_cfg.birth.at_scan`, which the
-    step-8 planting map does not have.
+    step-8a planting map does not have.
 - Fill in `test_r_matches_analytic_recursion` and
   `test_constant_profile_is_the_special_case_of_the_general_recursion`. They can be written
-  before step 2 is done and fail until it is.
+  before step 2 is done; mark them `xfail(strict=True)` until it is (D24).
 - Then run the check per track on the bank; each bank track is the A2 recursion.
   - **Compare pruned tracks on the unpruned companion log** (D14,
     `estimates_<kind>_unpruned.jsonl`). After a deletion, `r_trajectory` reports 0, but A2
@@ -257,11 +275,44 @@ tautology.
 
 Done when both tests pass for both p_D profiles.
 
+**What this check shows, and what it does not.** The events are built from the filter's own
+predicted moments and its own ℓ/κ. So the check verifies the *existence recursion*: given
+the filter's moments, r follows A2. An error in the mean/cov update, in gating or in how p_D
+is evaluated is invisible to it, because both sides see the same numbers. The thesis
+sentence is therefore "the existence recursion matches A2, given the filter's predicted
+moments". The Gaussian part is checked separately with NEES (step 5).
+
 B3 is the root of the validation chain: every later method is checked by reduction tests
 that end at the Bernoulli filter B3 validates. So keep `ScanEvent` single-track and
 Bernoulli-specific; do not generalise it to many targets. Because events are built from
 the filter's own predicted moments, the check does not depend on the collapse strategy.
 After steps 9 and 10, rerun it as their regression test.
+
+**Step 3b. Stub the p_D evaluation strategy.** p_D depends on the state (it drops to 0 at
+the FOV edges). The exact branches are then:
+- detection: ∫ p_D(x) g(z | x) N(x; m, P) dx;
+- missed: weight 1 − p̄_D with p̄_D = ∫ p_D(x) N(x; m, P) dx, and density
+  (1 − p_D(x)) N(x; m, P) / (1 − p̄_D), which is not Gaussian.
+
+The filter most likely uses p_D(m). Which form A2 claims is the author's call (open
+question 3). The agent adds a small strategy interface, e.g. `filters/detection_prob.py`
+with a `PdEvaluation` protocol, and these options:
+
+| Option | Detection branch | Miss weight | Miss density | Cost | Where it is wrong |
+|---|---|---|---|---|---|
+| A. `AtMean` (current, default) | p_D(m) | 1 − p_D(m) | unchanged N(m, P) | none | near the FOV edge: a track whose mean is just outside gets no update, even with most of its mass inside |
+| B. `AtBranchMean` | p_D at the Kalman-updated mean of that branch | as A | as A | small | as A for misses; the detection itself says where the object is, so the detection branch improves |
+| C. `Expected` | p̄_D from sigma points (5 points in 2D) | 1 − p̄_D (exact) | unchanged N(m, P) | 5 FOV evaluations per track | only the miss density shape |
+| D. `ExpectedWithShift` | as C | as C | (1 − p_D(x)) N(x) moment-matched with sigma points: the mean moves away from the FOV ("negative information") | as C | closest to exact; needs a derivation first |
+
+- Implement A by wrapping the current code; all outputs stay within 1e-12 (D18).
+- B, C and D are stubs that raise `NotImplementedError`, each with a docstring that names
+  the derivation it waits for.
+- Whatever is chosen, `ScanEvent` should carry the p_D value(s) the filter used, so the
+  A2 cross-check keeps testing the combination formula and not the p_D approximation.
+- Where it matters: D11's edge truncation (detected/visible 0.78 against p_D 0.85) is
+  exactly the region where A and C differ. With the 3.6 cm map prior, P is small, so away
+  from the edges all four agree.
 
 **Step 4. Monte-Carlo: per-seed cross-check (4a), model check (4b, future work), timing (4c).**
 
@@ -274,9 +325,9 @@ general:
 
 It only holds for a phantom that sees nothing but misses.
 
-The author chose (a) as the B3 deliverable and (b) as future work (2026-09-30). Record
-this as a decision and rework the test's name and docstring to match. The model question
-that test 2 was meant to answer ("does the derivation match the simulator?") moves to 4b.
+The author chose (a) as the B3 deliverable and (b) as future work (2026-09-30, D17). Rework
+the test's name and docstring to match. The model question that test 2 was meant to answer
+("does the derivation match the simulator?") moves to 4b.
 
 *This is plain Monte Carlo, not MCMC.* The trials are independent: trial i uses seed
 base + i, and each trial is drawn directly from the simulator.
@@ -293,7 +344,7 @@ base + i, and each trial is drawn directly from the simulator.
   - The new loop: for each seed, simulate → run the filter(s) → apply a list of per-run
     measurement functions while the run folder still exists → aggregate.
   - 4a plugs in `compare_r`, branch coverage and fates; 4c plugs in timing; steps 5, 6 and
-    16 plug in GOSPA, cardinality and phantom lifetime.
+    16 plug in GOSPA, cardinality, NEES and phantom lifetime.
 
   This is the most important choice for keeping the code reusable. A B3-only loop would be
   rewritten three times.
@@ -301,27 +352,41 @@ base + i, and each trial is drawn directly from the simulator.
   evaluate the reference and run `compare_r`.
 - Report:
   - the pass rate at the tolerance;
-  - the maximum |error| over all seeds;
+  - the maximum absolute error over all seeds;
   - the seed and scan of any divergence;
   - **branch coverage**: how many scans of each kind were checked (birth, in-view miss,
     out-of-view, one gated detection, two or more).
 
-  The sentence this produces for the thesis: "the implementation matched A2 to 1e-9 on X
-  scans over n random trials, covering these branches".
-- **Robustness over trials.** Record the fate of each hypothesis: pruned, confirmed on a
-  plant, confirmed on a weed, or still alive at the end. Report each fate as a proportion
-  with a binomial (Wilson) confidence interval. This turns the one-off 200-seed study in
-  D15 into a command.
+  The sentence this produces for the thesis: "the existence recursion matched A2 to 1e-12
+  on X scans over n random trials, covering these branches".
+- **Robustness over trials: one outcome per seed.** Tracks in the same seed share clutter
+  and neighbours, so they are not independent trials. Pooling them would make the
+  confidence intervals too narrow. The rule: every seed contributes one number per
+  quantity, and intervals are computed across seeds.
+  - **Phantoms.** Each seed gets one *controlled phantom injection*: a hypothesis placed at
+    a configured empty position and scan, with a configured r. It is an experiment
+    setting, not a `BirthModel`: there is no detection behind it. Its fate is the seed's
+    one outcome, reported as a proportion with a Wilson interval.
+  - **Clutter or a weed near the phantom** is part of the random scene; averaging over seeds
+    is what covers it. To see its effect, *stratify*: at analysis time, from truth, record
+    how many clutter returns and weeds fell inside the phantom's gate over its life, and
+    report the fates per stratum (e.g. "weed in gate: yes / no"), each with its own
+    interval. To *control* it instead, place the injection at a configured distance d from
+    the nearest weed and sweep d.
+  - **Plants.** Per seed, compute a proportion over its plants, e.g. the fraction of in-view
+    plants confirmed by scan k, or, among plants with a weed or clutter return in their
+    gate, the fraction pulled more than x cm away. That proportion is the seed's outcome;
+    report the mean over seeds with a t-interval.
+  - **Fate categories:** pruned; confirmed on a plant; confirmed on a weed; alive and
+    sustained by clutter (no plant or weed within d_match, r above r_conf); alive and
+    unconfirmed. The thresholds r_conf and d_match are decisions (open question 4).
   - `ScanEvent.n_clutter_gated` lumps weed returns in with Poisson clutter, so it cannot
-    decide "confirmed on a weed".
-  - Classify fates with an analysis-side helper that reads `ScanLabels.weed_origin` and
-    `origin`. Do not add a filter input for this.
+    decide "confirmed on a weed". Classify fates with an analysis-side helper that reads
+    `ScanLabels.weed_origin` and `origin`. Do not add a filter input for this.
+  - With class labels (step 8b), "confirmed on a weed" can only happen through a weed
+    labelled "plant"; report it against the confusion rate.
 - Keep `MonteCarloResult` (mean r ± standard error) as a descriptive figure, not a
   pass/fail test.
-- **Open question.** For the fate statistics, every seed must run the same experiment. But
-  `birth.seeds` picks detections by index, and a given index means something different in
-  each seed (the `run_monte_carlo` docstring flags this). Propose a truth-blind fix to the
-  author, e.g. a birth model at a configured position and scan.
 
 **4b. Event-rate model check (future work: describe it in the thesis, implement later).**
 Compare what the filter actually sees with what its assumed model predicts:
@@ -337,7 +402,7 @@ truncation.
 - **Timing log.** `run_filter` times `predict`, `update` and `extract` for each scan with
   `time.perf_counter`. It writes `timing_<log_name>.jsonl` with the fields k, predict_s,
   update_s, extract_s, n_detections and n_reported.
-  - It is a separate file so the estimates logs stay deterministic and byte-identical.
+  - It is a separate file so the estimates logs stay deterministic.
   - Filter-internal sizes (components, gated pairs, hypotheses, cluster sizes) go through
     the existing `HasDiagnostics`.
 - **Scaling command.** Sweep one scenario parameter over several values × seeds. Plot the
@@ -351,9 +416,11 @@ truncation.
 - **Hypothesis to test, not assume.** Cost per scan should follow the number of objects
   *in view* and the *cluster size* (how many tracks share gates), not total N. The current
   bank updates every component on every scan, so its cost grows with total N.
-  - Skipping tracks with p_D(mean) = 0 is exact for the current Bernoulli update: every ℓ_i
-    is 0, so r and the Gaussian are unchanged.
-  - Add the skip only together with a test that the estimates stay byte-identical.
+  - Skipping tracks with p_D(mean) = 0 is exact in exact arithmetic for the current
+    Bernoulli update: every ℓ_i is 0, so r and the Gaussian are unchanged. In floating
+    point the current code computes r / ((1 − r) + r), and (1 − r) + r is not always
+    exactly 1.0, so the skip may change the last bits.
+  - Add the skip only together with a test that the estimates stay within 1e-12 (D18).
 - **Expected cost per scan**, to check against (T tracks, M detections, n = T + M):
 
   | Method | Expected cost per scan |
@@ -380,27 +447,41 @@ truncation.
 - **Existence map**: D(x) = Σ r_i N(x; m_i, P_i) on a grid. This is the PHD of any filter's
   output, so every method can be drawn as a heatmap. The PHD grid filter (step 14) draws
   its own grid in the same figure.
-- **Cardinality**: Σ r_i against the true number of plants in view (from labels). It stays
-  flat at N for known-N methods.
+- **Cardinality, restricted to the view** (D21): Σ r_i over the tracks whose mean is in
+  view, against the number of true plants in view (from labels). "In view" is decided by
+  the same FOV function on both sides. For known-N methods the two curves differ only where
+  the map and the field differ, e.g. a missing plant in step 8c.
 - **GOSPA over time**, split into localisation error, missed objects and false tracks.
   Implement the stub in `analysis/metrics.py`.
-- **Phantom lifetime**: scans from birth to deletion, for methods that have births. This is
-  the quantity A2 §5 is about.
+- **NEES over time.** For each confirmed track matched to a true plant, e = m − x_true and
+  NEES = eᵀ P⁻¹ e. Plot the average over tracks with the 95 % band of χ²₂ averaged over
+  that many tracks. Known-N and bounded-N methods match track i to planned plant i; the
+  other methods use the GOSPA assignment. This is the check on the Gaussian part that the
+  A2 cross-check cannot give (step 3), and the measurement step 8d needs.
+- **Association accuracy** (proposed; the author confirms or drops it): per scan, the
+  fraction of plant-origin detections whose largest association weight goes to their own
+  plant's track, and the fraction of clutter and weed returns that go to no track. With a
+  4 cm prior, known-N is almost pure association, so this separates methods where GOSPA
+  barely can. It needs the association weights, i.e. the richer channel of step 7 (open
+  question 6).
+- **Phantom lifetime**: scans from birth to deletion, for methods that have births;
+  "not applicable" for the rest (§2 rule 1). This is the quantity A2 §5 is about.
 
 **Step 6. A `compare` command** that runs several filters on one run folder and shows each
 figure side by side. `track_all_filters` in `runner/track.py` already does the running.
 
 **Step 7. A figure contract test**: every figure must render for every entry in `FILTERS`,
-in the style of `test_filter_interface_contract.py`.
+in the style of `test_filter_interface_contract.py`. A labelled "not applicable" panel
+counts as rendering; an exception does not.
 
 Optional, and it needs an interface decision: an association figure showing the track ×
 detection weights at one scan. It is the most direct picture of how GNN, JPDA and PMB
 differ. It needs a richer channel than `HasDiagnostics`, which only carries a flat
-`dict[str, float]`.
+`dict[str, float]`. The association-accuracy metric of step 5 needs the same channel.
 
-### Phase 3: N known (the thesis scope)
+### Phase 3: N known, then N bounded (the thesis scope)
 
-**Step 8. The planting-plan prior.**
+**Step 8a. The planting-plan prior.**
 - **What:** a filter-side map of the N plants. The filter config holds:
   - the rows (x, y_start, y_end, spacing);
   - a prior position std that combines RTK and planting accuracy, e.g.
@@ -408,23 +489,90 @@ differ. It needs a richer channel than `HasDiagnostics`, which only carries a fl
 - **How:** `initial_state` holds N components with r = 1, and there is no birth.
 - **Why this is truth-blind:** it works the same way as `assumed_sensor`. The map is the
   nominal plan the farmer knows, not the jittered positions in truth.jsonl.
-- **Weeds and clutter** are not in the map, so to the filter they are false positives.
+- **Clutter** is not in the map, so to the filter it is a false positive. Weeds are handled
+  by their label from step 8b on; before 8b exists, weed returns act as clutter.
 
 Expected behaviour to check:
 - The prior (about 4 cm) is much tighter than the measurement noise (20 cm), so the
   problem is almost pure association.
 - S is still dominated by R, so the gate is still about 0.6 m wide and neighbouring plants
   share detections. That is why step 12 exists.
-- The failure mode is a weed inside a plant's gate. Measure how often it happens from the
-  labels.
+- The failure modes are a clutter return or a mislabelled weed inside a plant's gate, and a
+  neighbour's detection pulling a plant. Measure how often each happens from the labels.
 
-Future work, one line in the decision: the proposal says N is "bounded a priori", which
-means *at most* N, e.g. a planned plant that never grew. That brings back an r per map
-slot, and connects this case to the unknown-N half.
+**Step 8b. Class labels on detections (stubbed classifier).**
+- **World side:** each detection gets a `label` in {plant, weed}, drawn from a confusion
+  matrix C[origin][label] in the scenario config, with rows for plant, weed and clutter.
+  The default is the perfect classifier (identity for plant and weed; clutter labelled
+  "plant", so it still reaches plant tracks).
+- **Filter side:** the filter sees the label and an *assumed* confusion matrix, the same
+  way it sees `assumed_sensor`; never the truth.
+  - **Perfect classifier (first version):** plant tracks drop weed-labelled detections
+    before the update. No new math.
+  - **Imperfect classifier (later):** the label enters the branch table as a factor,
+    ℓ_i = p_D g(z_i) P(label_i | plant) and κ_i = λ_FA c(z_i) P(label_i | clutter) plus a
+    term for weeds labelled "plant". That weed term is persistent in space, not Poisson,
+    so treating it as part of κ is an approximation. Needs the author's derivation first.
+- **Weed-labelled detections** are written to the run folder, not used by the plant
+  filter. A weed map built from them is future work (Phase 4 machinery, see §1).
+- **Reduction test:** with a scenario without weeds, 8b gives the same estimates as 8a
+  (D18).
+- Interface change (a new detection field, a new config block): the author approves first.
+
+**Step 8c. Bounded N: missing plants** (moved forward from future work, D23).
+- **What:** each map slot is a Bernoulli with prior r_0 < 1, e.g. the emergence rate of
+  the crop, from the filter config. No birth. The Gaussian comes from the plan as in 8a.
+- **World side:** a scenario parameter `p_missing`: the probability that a planned slot has
+  no plant. Truth records which slots are empty; the filter does not see it.
+- **Output:** r per slot over time. Metric: how well "r < threshold" finds the truly empty
+  slots (precision and recall, or a ROC curve over the threshold), and how many scans it
+  takes to decide.
+- **Reduction test:** r_0 = 1 gives 8a.
+- **Expected result, to confirm:** on the bank, an empty slot between two plants at 0.35 m
+  is kept alive by its neighbours' detections (about +1.3 log-odds per scan, §5). So the
+  bank should fail here, and JIPDA (step 12 with existence) should not. Run the bank first
+  and show the failure; this is the main motivation for step 12 and a central result for
+  the proposal.
+- Open: the value of r_0, and how p_missing is placed (independent per slot, or in runs of
+  neighbouring slots). Open question 8.
+
+**Step 8d. Stub the yaw experiment.**
+- **What:** a command skeleton, e.g. `experiments/yaw_sensitivity.py`, that sweeps a
+  constant yaw bias b ∈ {0, 0.5, 1, 2}° and the existing yaw-wobble amplitude, while the
+  filter keeps assuming the pose is known. It reports NEES, GOSPA and (if confirmed)
+  association accuracy against b.
+- **Expected:** NEES leaves the χ² band once b × range exceeds the posterior std, which for
+  the 3.6 cm prior is already below 1° at 4 m.
+- **Stub only for now:** the config block and the command exist, the body raises
+  `NotImplementedError` with a docstring that says it waits for NEES (step 5). One test
+  checks that the config parses.
+- A constant yaw-bias slot in `world/path.py` is an interface change (open question 9);
+  the wobble slot already exists.
 
 **Step 9. The shared branch table.** Move the per-track branch computation out of
 `BernoulliFilter._update_existing` into one function (e.g. `filters/branches.py`). This is a
-pure refactor: every existing estimates log must stay byte-identical.
+pure refactor: every existing estimates log must stay within 1e-12 (D18).
+
+Fix the structure now, for every later method, so the table is not refactored again. For
+one scan, with tracks j = 1..T and detections i = 1..M, all weights in log space:
+
+| Field | Shape | Meaning |
+|---|---|---|
+| `log_w_absent` | T | ln(1 − r_j): the track does not exist; −∞ when r ≡ 1 |
+| `log_w_missed` | T | ln(r_j (1 − p_D,j)): exists but not detected, with p_D from step 3b |
+| `log_w_det` | T × M | ln(r_j p_D,j g_j(z_i)), plus ln P(label_i \| plant) once 8b's imperfect classifier exists; −∞ outside the gate |
+| `gated` | T × M | boolean gate mask |
+| `log_kappa` | M | ln κ(z_i), plus the label factor from 8b |
+| `log_w_new` | M | ln e(z_i), the "new object" weight from the Poisson part (steps 13 and 15); −∞ when there is none |
+| `det_moments` | T × M | Kalman-updated (mean, cov) per gated pair |
+| `missed_moments` | T | (mean, cov) of the missed branch (unchanged for step 3b options A to C) |
+
+- The Bernoulli update is one way to combine it: the existence weight is
+  exp(`log_w_missed`) + Σ_i exp(`log_w_det` − `log_kappa`), against exp(`log_w_absent`).
+- Splitting "does not exist" from "exists but missed" matters: the current Bernoulli update
+  sums them, but JIPDA and PMB need them apart.
+- Only the columns the Bernoulli filter uses are filled in step 9; `log_w_new` is −∞ and
+  the label factor is 0 until steps 8b and 13 fill them.
 
 **Step 10. Moment-matching collapse.** Add one class in `filters/collapse.py` and one line
 in `COLLAPSE_STRATEGIES`. This needs the author's `TODO(Wessel)` in A2 §3.1 (the P_merge
@@ -435,76 +583,123 @@ formula) first.
 
 **Step 11. GNN** (`association/assignment.py`, `filters/gnn.py`), using scipy's
 `linear_sum_assignment`. GNN is the baseline of the comparison.
-- **Reduction test:** with one track, GNN equals Bernoulli/PDA with `KeepBestBranch`.
+- **Cost matrix** (D20): T rows; M detection columns with cost −ln(p_D g_j(z_i)/κ_i)
+  (from `log_w_det` − `log_kappa`, infinite outside the gate), plus T missed-detection
+  columns where entry (j, j) costs −ln(1 − p_D,j) and the other entries are infinite.
+  Without the missed columns, GNN cannot leave a track unassigned, and the reduction fails.
+- **Reduction test:** with one track and r pinned to 1, GNN equals PDA with
+  `KeepBestBranch`, up to ties. (The Bernoulli with `KeepBestBranch` and free r does not
+  match: it still averages r.)
 - **What that shows:** the current filter already hard-selects the position while still
   averaging r.
 
-**Step 12. JPDA** (`filters/jpda.py`, `association/murty.py`). This needs the author's
-derivation first; A2 §7 lists it as open.
+**Step 12. JPDA and JIPDA** (`filters/jpda.py`, `association/murty.py`). This needs the
+author's derivation first; A2 §7 lists it as open. Ask for it with existence included, so
+the same code covers N bounded (JIPDA without birth, for step 8c).
+- **Marginals:** exact enumeration for small clusters; Murty k-best for large ones. The
+  reduction tests use exact enumeration only (D19). Murty is tested against exact
+  enumeration on small clusters.
 - **Reduction tests:** one track equals PDA; tracks whose gates never overlap equal a bank
-  of PDAs.
+  of PDAs; r ≡ 1 turns JIPDA into JPDA.
 - **What the second test enables:** measuring D12's independence approximation. Run the
-  bank and JPDA on the step-8 map and show where they diverge.
+  bank and JPDA on the step-8a map, and the bank and JIPDA on the step-8c map, and show
+  where they diverge.
 
 ### Phase 4: N unknown
 
 **Step 13. Birth from measurements** (A2 §4): r_b = e / (e + λ_FA c(z)), with
 e = ∫ λ_u p_D g dx and λ_u taken from the config.
 - It is a new `BirthModel` next to `SingleFromMeasurement`, as the latter's docstring
-  already plans.
-- Link to step 8: the planting plan is one choice of λ_u. N known is the limiting case
-  where λ_u is N sharp bumps with r = 1.
+  already plans. It fills `log_w_new` in the branch table.
+- Link to steps 8a and 8c: the planting plan is one choice of λ_u. N known is the limiting
+  case where λ_u is N sharp bumps with r = 1; N bounded is the same bumps with r = r_0.
+- It is also what a future weed map (§1) would use, since weeds have no plan.
 
 **Step 14. PHD grid filter** (`filters/phd_grid.py`): the heatmap as an actual filter. It
 has a closed form to check against, in the style of B3: a region that is in view with no
-detection nearby loses exactly a factor (1 − p_D) per scan.
+detection nearby loses exactly a factor (1 − p_D) per scan. Its per-track figures are "not
+applicable" (§2 rule 1).
 
 **Step 15. PMB** (`filters/pmb.py`). It combines:
 - step 12's association step, with existence probabilities;
-- step 14's grid as the Poisson part;
+- step 14's grid, *without its detection term*, as the Poisson part (§3);
 - step 13's birth.
 
 This needs A3 first.
-- **Reduction test:** r = 1 with no Poisson part equals JPDA.
-- **Reduction test:** one object equals Bernoulli with moment matching.
+- **Reduction test:** r = 1 with no Poisson part equals JPDA, with marginals by exact
+  enumeration on both sides (D19). If PMB uses loopy belief propagation in normal runs,
+  test that separately against exact enumeration on small clusters.
+- **Reduction test:** one object and zero Poisson intensity equals Bernoulli with moment
+  matching; the r = 0 Bernoullis created from detections are dropped.
 
 **Step 16. PMBM, only if the data calls for it.** A2 §3.2 leaves open whether keeping
 several hypotheses matters under this scope. Decide by comparing PMB with JPDA using steps
-4c–7: phantom lifetime, GOSPA, and time per scan.
+4c–7: phantom lifetime, GOSPA, NEES, and time per scan. This comparison is one of the
+proposal's outcomes. If PMBM is built:
+- **Reduction test:** r = 1, no birth, no Poisson part equals MHT over a fixed set of tracks.
+- Decide and record its output rule (best global hypothesis or marginal, §2 rule 1).
 
 ## 7. Open questions
 
 Carry these until they are decided, then move each answer into DECISIONS.md.
 
-1. The `ScanEvent` fields for the detection branch and the birth scan (step 2). The next
-   iteration (§0a) proposes `likelihood_ratios` and `born`; confirm the names with the
-   author.
-2. Passing (mean, cov) instead of means to `build_scan_events` (step 3). This is part of
-   §0a.
-3. How to give every seed the same phantom birth, for the fate statistics (step 4a).
-4. The timing log format: a separate file (recommended) or a field in the estimates log
+1. The `ScanEvent` fields for the detection branch and the birth scan (step 2). The author
+   decides.
+2. Passing (mean, cov) instead of means to `build_scan_events` (step 3). This is an
+   interface change and needs approval.
+3. Which p_D form A2 claims, and which option (A to D) the filter uses (step 3b).
+4. The fate thresholds r_conf and d_match, and the injection position and scan for the
+   controlled phantom (step 4a).
+5. The timing log format: a separate file (recommended) or a field in the estimates log
    (step 4c).
-5. The association figure, and the diagnostics channel it needs (step 7).
-6. Map slots with r < 1, for "bounded" N (step 8, future work).
-7. Whether PMBM is needed (step 16).
+6. The association figure and association-accuracy metric, and the diagnostics channel
+   both need (steps 5 and 7).
+7. The detection `label` field, the confusion matrix config, and the derivation for the
+   imperfect classifier (step 8b).
+8. The prior r_0 per slot, and how the simulator places missing plants (step 8c).
+9. A constant yaw-bias slot in `world/path.py` (step 8d).
+10. The output rule for MHT and PMBM: best global hypothesis or marginal (§2, step 16).
+11. Whether PMBM is needed (step 16).
+12. Weed drift: D15 measured "hover", §5's estimate with gated clutter gives about +0.30
+    per scan. Find out why they differ.
+
+## 7b. Decisions reserved on 2026-09-30
+
+The author decided these in the review of 2026-09-30. Write each row into DECISIONS.md in
+the commit of the step named; the number is reserved so parallel sessions do not collide.
+
+| D | Decision | Written at |
+|---|---|---|
+| D16 | Known pose (RTK) is a simplification for now; revisited if RTK is not on the Go2; heading error studied in step 8d | step 1 |
+| D17 | Monte Carlo: the per-seed cross-check (4a) is the B3 deliverable; the event-rate model check (4b) is future work | step 4 |
+| D18 | Regression and reduction comparisons use an absolute tolerance of 1e-12 on every r, mean and covariance entry, instead of byte-identical logs; `compare_r` uses absolute error on r | step 3 |
+| D19 | Reduction tests that involve association marginals use exact enumeration on small clusters | step 12 |
+| D20 | GNN's cost matrix uses likelihood ratios with one missed-detection column per track; its reduction test pins r = 1 | step 11 |
+| D21 | The cardinality figure is restricted to the view on both sides | step 5 |
+| D22 | Detections carry a class label; plant tracks do not associate weed-labelled detections; weeds may get their own map later | step 8b |
+| D23 | Thesis scope is N bounded by the plan; bounded N moves forward as step 8c; N known is its limiting case | step 8c |
+| D24 | Tests written before their code exists are marked `xfail(strict=True)` | step 3 |
 
 ## 8. Progress
 
 | Step | Status | Notes |
 |---|---|---|
-| **0a** | **next** | Priority: fix the B3 interface (`ScanEvent.likelihood_ratios`, `ScanEvent.born`, `build_scan_events` takes (mean, cov)), then implement `r_sequence` and step 3 |
-| 1 | done | 2026-09-30: D16 recorded; `generate_path` and the `world/path.py` module docstring updated. No behaviour change |
-| 2 | partial | 2026-09-30: `r_sequence` branches documented. The author drafted them and they were corrected against A2 §2/§3.1/§4 and A0; the author still has to check them line by line. Waiting on: the `ScanEvent` fields (§0a); the A2 rows in `docs/derivations/README.md`. The body still raises `NotImplementedError` |
-| 3 | partial | `compare_r`, `plot_r_vs_analytic` and `plot_r_montecarlo` exist. `build_scan_events` and the three B3 test bodies still raise `NotImplementedError`. `build_scan_events` needs (mean, cov); `analyse` still assumes one track |
+| 1 | not started | wording for D16 in step 1 |
+| 2 | partial | 2026-09-30: `r_sequence` branches documented. The author drafted them and they were corrected against A2 §2/§3.1/§4 and A0; the author still has to check them line by line. Waiting on: approval of the `likelihood_ratios` and `born` fields on `ScanEvent`; the A2 rows in `docs/derivations/README.md`. The body still raises `NotImplementedError` |
+| 3 | partial | `compare_r`, `plot_r_vs_analytic` and `plot_r_montecarlo` exist. `build_scan_events` and the three B3 test bodies still raise `NotImplementedError`. `build_scan_events` needs (mean, cov); `analyse` still assumes one track; `compare_r` to be checked for absolute error (D18) |
+| 3b | not started | option A wraps current code; B to D stubbed; waits on open question 3 for the choice |
 | 4 | partial | `run_monte_carlo` and `standard_error` exist, but `run_monte_carlo` must become the general trial loop (4a); 4a, 4b and 4c not started |
-| 5 | partial | scene, counts, r_vs_k and hypotheses figures exist (shaped for the bank); `gospa` is a stub |
+| 5 | partial | scene, counts, r_vs_k and hypotheses figures exist (shaped for the bank); `gospa` is a stub; cardinality, NEES and association accuracy not started |
 | 6 | not started | `track_all_filters` exists |
 | 7 | not started | |
-| 8 | not started | |
-| 9 | not started | |
+| 8a | not started | |
+| 8b | not started | interface change; first version is the perfect classifier |
+| 8c | not started | expected to show the bank's failure on empty slots |
+| 8d | not started | stub only; waits on NEES (step 5) for the body |
+| 9 | not started | table structure fixed in step 9 |
 | 10 | not started | waits on the A2 §3.1 `TODO(Wessel)` |
 | 11 | not started | `assignment.py` is a stub |
-| 12 | not started | `murty.py` is a stub; waits on a JPDA derivation |
+| 12 | not started | `murty.py` is a stub; waits on a JPDA/JIPDA derivation |
 | 13 | not started | |
 | 14 | not started | |
 | 15 | not started | waits on A3 |
