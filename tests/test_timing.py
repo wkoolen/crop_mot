@@ -15,7 +15,7 @@ import pytest
 
 from crop_mot.analysis.estimates_log import read_estimates
 from crop_mot.analysis.timing import SWEEPS
-from crop_mot.config import RegionConfig, RunConfig, WeedsConfig
+from crop_mot.config import PlanConfig, RegionConfig, RunConfig, WeedsConfig
 from crop_mot.filters import build_filter
 from crop_mot.io import read_jsonl
 from crop_mot.runner.run_dir import RunDir
@@ -88,3 +88,14 @@ def test_run_scaling_writes_its_points_and_figure(tiny_run_config: RunConfig,
     assert (tmp_run_dir.plots / "scaling.png").stat().st_size > 0
     assert np.isfinite(result.slope)
     assert {p.name for p in tmp_run_dir.root.iterdir()} == {"plots", "metrics.json"}
+
+
+def test_a_known_n_plan_follows_the_swept_rows(tiny_run_config: RunConfig) -> None:
+    """Row length and spacing move the plan with the world, keeping the model matched."""
+    plan = PlanConfig(rows=tiny_run_config.scenario.world.rows, prior_std=0.036)
+    cfg = replace(tiny_run_config, filter_cfg=replace(tiny_run_config.filter_cfg, plan=plan))
+    for sweep, value in (("row_length", 20.0), ("spacing", 0.5)):
+        swept = SWEEPS[sweep].apply(cfg, value)
+        assert swept.filter_cfg.plan.rows == swept.scenario.world.rows
+        assert swept.filter_cfg.plan.prior_std == 0.036
+    assert SWEEPS["row_length"].apply(tiny_run_config, 20.0).filter_cfg.plan is None

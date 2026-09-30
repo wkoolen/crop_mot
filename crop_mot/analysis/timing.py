@@ -33,8 +33,16 @@ from crop_mot.sensor.record import read_labels
 from crop_mot.world.truth import read_truth
 
 
+def _with_plan_rows(cfg: RunConfig, rows) -> RunConfig:
+    """A known-N filter's plan follows the world's rows, so the model stays matched."""
+    plan = cfg.filter_cfg.plan
+    if plan is None:
+        return cfg
+    return replace(cfg, filter_cfg=replace(cfg.filter_cfg, plan=replace(plan, rows=rows)))
+
+
 def _row_length(cfg: RunConfig, length: float) -> RunConfig:
-    """Rows of the given length; the path is lengthened to walk all of it."""
+    """Rows of the given length (and the plan's, if any); the path walks all of it."""
     world = cfg.scenario.world
     rows = tuple(replace(row, y_end=row.y_start + length) for row in world.rows)
     weeds = world.weeds
@@ -45,14 +53,15 @@ def _row_length(cfg: RunConfig, length: float) -> RunConfig:
     n_scans = math.ceil((rows[0].y_end - path.y_start) / step) + 1
     scenario = replace(cfg.scenario, world=replace(world, rows=rows, weeds=weeds),
                        path=replace(path, n_scans=n_scans))
-    return replace(cfg, scenario=scenario)
+    return _with_plan_rows(replace(cfg, scenario=scenario), rows)
 
 
 def _spacing(cfg: RunConfig, spacing: float) -> RunConfig:
-    """Plants this far apart along every row."""
+    """Plants this far apart along every row (and in the plan, if any)."""
     world = cfg.scenario.world
     rows = tuple(replace(row, spacing=spacing) for row in world.rows)
-    return replace(cfg, scenario=replace(cfg.scenario, world=replace(world, rows=rows)))
+    return _with_plan_rows(replace(cfg, scenario=replace(cfg.scenario,
+                                                         world=replace(world, rows=rows))), rows)
 
 
 def _lambda_FA(cfg: RunConfig, lambda_FA: float) -> RunConfig:
