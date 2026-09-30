@@ -647,24 +647,17 @@ Carry these until they are decided, then move each answer into DECISIONS.md.
    Decided: `likelihood_ratios` and `born` (D25).
 2. ~~Passing (mean, cov) instead of means to `build_scan_events` (step 3).~~ Decided:
    approved by the author on 2026-09-30 (D25).
-3. ~~Which p_D form A2 claims, and which option (A to D) the filter uses (step 3b).~~
-   Decided: A2 claims p_D_bar; the filter keeps option A, C is the next brick (D27).
-4. ~~The fate thresholds r_conf and d_match, and the injection position and scan for the
-   controlled phantom (step 4a).~~ Decided: r_conf = 0.5, d_match = 0.2 m, D8's phantom
-   (D28).
-5. ~~The timing log format: a separate file (recommended) or a field in the estimates log
-   (step 4c).~~ Decided: a separate file (D29).
-6. ~~The association figure and association-accuracy metric, and the diagnostics channel
-   both need (steps 5 and 7).~~ Decided: deferred to step 11 (D30).
-
-Questions 3 to 6 were answered by Claude at the author's request on 2026-09-30 ("keep
-everything as documented and build complexity brick by brick"); 7 to 12 stay open until
-their steps.
-7. ~~The detection `label` field, the confusion matrix config~~ (decided, D22), and the
-   derivation for the imperfect classifier (step 8b): still open, the author's.
-8. ~~The prior r_0 per slot, and how the simulator places missing plants (step 8c).~~
-   Decided: r_0 = 1 - p_missing = 0.9, independent per slot (D23).
-9. ~~A constant yaw-bias slot in `world/path.py` (step 8d).~~ Decided: `path.yaw_bias` (D41).
+3. Which p_D form A2 claims, and which option (A to D) the filter uses (step 3b).
+4. The fate thresholds r_conf and d_match, and the injection position and scan for the
+   controlled phantom (step 4a).
+5. The timing log format: a separate file (recommended) or a field in the estimates log
+   (step 4c).
+6. The association figure and association-accuracy metric, and the diagnostics channel
+   both need (steps 5 and 7).
+7. The detection `label` field, the confusion matrix config, and the derivation for the
+   imperfect classifier (step 8b).
+8. The prior r_0 per slot, and how the simulator places missing plants (step 8c).
+9. A constant yaw-bias slot in `world/path.py` (step 8d).
 10. The output rule for MHT and PMBM: best global hypothesis or marginal (§2, step 16).
 11. Whether PMBM is needed (step 16).
 12. Weed drift: D15 measured "hover", §5's estimate with gated clutter gives about +0.30
@@ -694,15 +687,15 @@ the commit of the step named; the number is reserved so parallel sessions do not
 | 1 | done | 2026-09-30: D16 reworded to "simplification for now, revisited if RTK is not on the Go2; heading error studied in step 8d" (first recorded as "thesis scope" in c049214). `world/path.py` module and `generate_path` docstrings updated. No behaviour change |
 | 2 | done | 2026-09-30: the author checked the `r_sequence` docstring line by line against A2. `ScanEvent` gained `likelihood_ratios` and `born` (D25); the body of `r_sequence` was transcribed from the docstring without opening `filters/bernoulli.py`, and committed before that file was read for the derivation map. The A2 rows of `docs/derivations/README.md` were written at the author's request after that commit, and the A0/A1 rows corrected to the section titles the code cites |
 | 3 | done | 2026-09-30: `build_scan_events` takes (mean, cov) (D25); `compare_r` absolute at 1e-12 (D18); `analyse --plots r_vs_analytic` checks every track, on the unpruned log when pruning (D14), and writes errors and branch coverage to metrics.json (D26). Both B3 tests pass for both p_D profiles, over births that together cover every branch; bank tracks checked too. Seed 42 phantom and bank runs match A2 to 1.2e-15. Rerun as the regression test after steps 9 and 10 |
-| 3b | done | 2026-09-30: `filters/detection_prob.py`: `PdEvaluation` (miss p_D, detection p_D, missed moments), option A `AtMean` wraps the current code and is the default (D27); B, C and D are stubs that raise at construction; optional `filter.p_D_evaluation`; `build_scan_events` uses the same strategy (D33). Seed-42 logs unchanged (difference 0.0). C is the next brick when the FOV-edge effect is measured |
-| 4 | done | 2026-09-30. 4a: `run_trials` general loop; per-seed cross-check (D17; 44/44 seeds pass, max error 1.0e-15); controlled phantom as birth kind `injected` (D34); fates, weed-in-gate strata and Wilson intervals via `analyse --plots phantom_fates` (D35; 200 seeds: on a plant 68 %, pruned 20 %, on a weed 7.5 %); d_match revised to 0.5 m (D28). 4b: future work, described only. 4c: timing log per filter run (D29), threads and CPU in run_meta, `scaling` command with four sweeps (D36; bank medians 0.3-2.6 ms against the 0.25 s budget). Left for later: the distance-to-weed sweep, per-seed plant proportions (step 8a), the p_D = 0 skip with its 1e-12 test |
-| 5 | done | 2026-09-30, brick by brick: `gospa` with its decomposition (D31); `analysis/evaluation.py` (in-view tracks and plants, D21; cardinality, GOSPA, NEES, existence density); figures `tracks`, `existence_map`, `cardinality`, `gospa`, `nees`, `lifetimes` via `analyse --plots`, each reading only (run, filter_name) (D32). Seed-42 bank: the two plant-captured phantoms sit above the NEES band from scan 44 (overconfident). Association accuracy deferred to step 11 (D30); the "not applicable" panel comes with the first filter that needs it |
-| 6 | done | 2026-09-30: `compare --run DIR --filters ...` runs the filters on one run folder (`track_all_filters`), composes every figure side by side (plots/compare_<plot>.png) and writes mean GOSPA, NEES-in-band share and median update time per filter to metrics.json (D37). bernoulli and a one-seed bank agree exactly, as D12 requires |
-| 7 | done | 2026-09-30: `tests/test_figure_contract.py` renders every `ANY_FILTER_PLOTS` figure for every `FILTERS` entry (2 x 6 today), parametrised over both (D38). The "not applicable" panel comes with the first filter that needs it; the B2/B3 figures are Bernoulli-specific and outside the contract; the association figure stays deferred (D30) |
-| 8a | done | 2026-09-30: `filter.plan` + `birth: null` start the bank from the plan's N slots at r = 1 (D39); configs `b4_known_n_bank{,_weeds}.yaml`; failure modes from the labels via `gate_contents` (D40). Seed 42: 70 slots, mean GOSPA 0.24 m, NEES in band 98 % of scans, 24 ms per scan; a neighbour's detection in 91 % of gates, clutter 19 %, weeds 9 % (weeds config), no plant pulled - a 3.6 cm prior moves a slot about 1 cm per wrong association. Scaling with the plan (row length 6-48 m): 13-88 ms median per scan, slope 0.92 against N (D36): cost grows with total N, so the p_D = 0 skip of 4c is worth testing. Not yet: the known-N NEES rule (track i against plant i) and multi-seed shares |
-| 8b | done | 2026-09-30: `Detection.label` from a confusion matrix (`sensor.classifier`, default perfect, own RNG stream: truth and z unchanged); `filter.assumed_classifier` (perfect only) drops weed-labelled detections from plant gates; config `b4_known_n_bank_labels.yaml` (D22). Seed 42: weed returns in gates 9.2 % -> 0 %, GOSPA 0.249 -> 0.244 m. The imperfect classifier waits on the label-factor derivation (open question 7) |
-| 8c | done | 2026-09-30: `world.p_missing` (independent per slot, own stream) and `plan.r_0`; configs `b1_two_rows_missing.yaml`, `b4_bounded_n_bank.yaml` (r_0 = 0.9); every slot checked against A2 (`r_initial`); `missing_plants` metric and figure, with the first "not applicable" panel (D23). Seed 42: the bank finds 0 of 4 seen empty slots, each at r = 1.0, as expected - the neighbours' detections multiply an empty slot's odds by about 7 per scan. Step 12 (JIPDA) is what should fix it. Later bricks: runs of neighbouring gaps, several seeds |
-| 8d | partial | 2026-09-30, brick 1: `path.yaw_bias` slot, `configs/b4_yaw_sensitivity.yaml`, the `yaw` command with a stub body, one parse test (D41). The body's condition (NEES, step 5) is met; next brick: the unknown-pose branch and the sweep |
+| 3b | not started | option A wraps current code; B to D stubbed; waits on open question 3 for the choice |
+| 4 | partial | `run_monte_carlo` and `standard_error` exist, but `run_monte_carlo` must become the general trial loop (4a); 4a, 4b and 4c not started |
+| 5 | partial | scene, counts, r_vs_k and hypotheses figures exist (shaped for the bank); `gospa` is a stub; cardinality, NEES and association accuracy not started |
+| 6 | not started | `track_all_filters` exists |
+| 7 | not started | |
+| 8a | not started | |
+| 8b | not started | interface change; first version is the perfect classifier |
+| 8c | not started | expected to show the bank's failure on empty slots |
+| 8d | not started | stub only; waits on NEES (step 5) for the body |
 | 9 | not started | table structure fixed in step 9 |
 | 10 | not started | waits on the A2 §3.1 `TODO(Wessel)` |
 | 11 | not started | `assignment.py` is a stub |

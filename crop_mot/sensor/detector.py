@@ -18,6 +18,28 @@ from crop_mot.types import Detection, Pose2D, Scan, ScanLabels
 from crop_mot.world.truth import GroundTruth
 
 
+def reexpress(z: np.ndarray, true: Pose2D, reported: Pose2D) -> np.ndarray:
+    """A world-frame detection, re-expressed through the reported pose. [B1, step 8d]
+
+    The camera measures relative to where the robot really is; the robot turns that into
+    world coordinates with the pose it believes. So the offset from the true pose, rotated
+    by the heading error, is added to the reported pose:
+        z_reported = p_reported + R(theta_reported - theta_true) (z - p_true).
+    A rigid map: a z inside the FOV at the true pose is inside it at the reported pose.
+
+    Args:
+        z: shape (2,), the detection in world coordinates, generated from the true pose.
+        true: the true pose.
+        reported: the reported pose.
+
+    Returns:
+        Shape (2,), the detection as the robot reports it.
+    """
+    angle = reported.theta - true.theta
+    rotation = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
+    return np.array([reported.x, reported.y]) + rotation @ (z - np.array([true.x, true.y]))
+
+
 def sample_scan(
     truth: GroundTruth,
     pose: Pose2D,
@@ -186,6 +208,10 @@ def sample_scan(
             raise ValueError("an imperfect classifier needs the rng_classifier substream")
         class_labels.append("weed" if u < classifier.p_weed(kind) else "plant")
     reported_pose = truth.poses[k].reported
+    if reported_pose != pose:
+        # Pose not known (roadmap step 8d): the robot reports what it measured through the
+        # pose it believes, so every z of the scan moves the same way.
+        z_list = [reexpress(z, pose, reported_pose) for z in z_list]
     scan = Scan(
         k=k,
         t=t,

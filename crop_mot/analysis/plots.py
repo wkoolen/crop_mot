@@ -644,6 +644,55 @@ def plot_missing_plants(run: RunDir, filter_name: str, out: Path) -> Path:
     return _save(fig, out)
 
 
+def plot_yaw_sensitivity(points: list, out: Path, title: str = "") -> Path:
+    """NEES, its in-band share and GOSPA against a constant yaw bias. [B4, step 8d]
+
+    One series per heading-wobble amplitude; each point is the mean over seeds, with a
+    bar from the lowest to the highest seed (one outcome per seed). Left: the average NEES
+    on a log axis against its expected value 2 - it leaves the band once the heading error
+    moves detections by more than the posterior std. Middle: the share of scans whose
+    average NEES is inside the 95 % band. Right: mean GOSPA.
+
+    Args:
+        points: the `runner.yaw_sensitivity.YawPoint`s of one sweep.
+        out: destination PNG path.
+        title: optional figure title.
+
+    Returns:
+        The path written.
+    """
+    fig = Figure(figsize=(10.0, 3.6), facecolor=SURFACE, layout="constrained")
+    axes = fig.subplots(1, 3, sharex=True)
+    wobbles = sorted({p.yaw_wobble_std_deg for p in points})
+    colours = (SERIES_1, SERIES_2, SERIES_3)
+    panels = (("mean_nees", "average NEES"), ("nees_in_band", "scans with NEES in band"),
+              ("mean_gospa", "mean GOSPA [m]"))
+    for ax, (key, label) in zip(axes, panels):
+        _style_axes(ax)
+        for colour, wobble in zip(colours, wobbles):
+            series = [p for p in points if p.yaw_wobble_std_deg == wobble]
+            bias = np.array([p.yaw_bias_deg for p in series])
+            values = [np.array(getattr(p, key), dtype=float) for p in series]
+            mean = np.array([np.nanmean(v) for v in values])
+            spread = np.array([[m - np.nanmin(v), np.nanmax(v) - m]
+                               for m, v in zip(mean, values)]).T
+            ax.errorbar(bias, mean, yerr=spread, color=colour, linewidth=2.0, marker="o",
+                        markersize=6, capsize=3, label=f"wobble {wobble:g}°")
+        ax.set_xlabel("yaw bias [°]")
+        ax.set_ylabel(label)
+    axes[0].axhline(2.0, color=INK_SECONDARY, linewidth=1.0, label="expected value 2")
+    axes[0].set_yscale("log")
+    plain = FuncFormatter(lambda value, _: f"{value:g}")
+    axes[0].yaxis.set_major_formatter(plain)
+    axes[0].yaxis.set_minor_formatter(plain)
+    axes[1].set_ylim(-0.02, 1.02)
+    axes[2].set_ylim(bottom=0)
+    axes[0].legend(frameon=False, fontsize=8, loc="upper left")
+    if title:
+        fig.suptitle(title, color=INK, fontsize=11)
+    return _save(fig, out)
+
+
 def _time_axis(ax, n_scans: int) -> None:
     ax.set_xlim(-0.5, n_scans - 0.5)
     ax.set_xlabel("scan k")
@@ -1304,3 +1353,4 @@ def animate_hypotheses(run: RunDir, filter_name: str, out: Path, fps: float = 4.
             _draw_hypotheses(data, scene, rows, k_now=k_now, animated=True)
             writer.grab_frame(facecolor=SURFACE)
     return out
+

@@ -58,18 +58,21 @@ class ScanView:
     plant_positions: np.ndarray
 
 
-def scan_views(run: RunDir, filter_name: str) -> list[ScanView]:
+def scan_views(run: RunDir, filter_name: str, cfg: RunConfig | None = None
+               ) -> list[ScanView]:
     """Each scan's in-view tracks and in-view true plants, for one filter's log. [B4]
 
     Args:
         run: a run folder the filter has run on.
         filter_name: which estimates log to read (e.g. "bernoulli_bank", or an unpruned
             companion's name).
+        cfg: the run config, for the scenario's FOV; None reads the folder's copy. The
+            Monte-Carlo trial loop's folders have none and pass it.
 
     Returns:
         One ScanView per scan, in scan order.
     """
-    cfg = load_run_config(run.config)
+    cfg = load_run_config(run.config) if cfg is None else cfg
     return _views(read_estimates(run.estimates(filter_name)), read_truth(run.truth),
                   read_labels(run.labels), cfg)
 

@@ -66,6 +66,7 @@ python3 -m crop_mot analyse  --run runs/<stamp>_b2_phantom_fates_seed42 --plots 
 python3 -m crop_mot compare  --run runs/<stamp>_b2_bernoulli_phantom_seed42 --filters bernoulli bernoulli_bank  # figures side by side
 python3 -m crop_mot track    --config configs/b4_known_n_bank_labels.yaml  # N known, weeds, class labels used
 python3 -m crop_mot track    --config configs/b4_bounded_n_bank.yaml   # N bounded, missing plants: the bank's failure
+python3 -m crop_mot yaw      --config configs/b4_yaw_sensitivity.yaml # NEES and GOSPA against a heading error (~40 s)
 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 python3 -m crop_mot scaling --config configs/b2_bernoulli_bank_weeds.yaml --sweep lambda_FA --values 1 2 4 8 16 --seeds 3
 python3 -m pytest tests -q
 ```
