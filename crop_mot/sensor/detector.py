@@ -28,6 +28,8 @@ def sample_scan(
     rng_clutter: np.random.Generator,
     multiplicity: MultiplicityConfig = MultiplicityConfig(),
     rng_multi: np.random.Generator | None = None,
+    weed_model: SensorModel | None = None,
+    rng_weeds: np.random.Generator | None = None,
 ) -> tuple[Scan, ScanLabels]:
     """Draw one scan of detections from the truth.
 
@@ -53,6 +55,14 @@ def sample_scan(
          to the FOV on its own; a plant counts as detected if at least one survives.
       4. Independently, draw n_clutter ~ Poisson(lambda_FA) false alarms, positioned
          uniformly over the FOV area.
+      4b. WEEDS (persistent false targets, decision D15; only when the truth has weeds).
+         Each weed inside the FOV is reported with probability weed_model.p_D(w, pose) at
+         z = h(w, pose) + v, v ~ N(0, R), truncated to the FOV like a plant detection.
+         Its origin is None - it is a false alarm - and `weed_origin` names the weed.
+         What sets it apart from step 4 is that the weed does not move: the same false
+         alarm can recur at the same place scan after scan, which the Poisson clutter the
+         filter assumes cannot do. The coin flips are independent across scans, so the
+         recurrence comes from the fixed position alone.
       5. SORT all detections together by z (lexicographically) before returning, so that
          index order carries no information about origin. Without this step a filter could
          cheat by assuming the first detection is the real one, and any resulting
@@ -66,6 +76,9 @@ def sample_scan(
     the geometry, not on p_D. Everything the multiplicity models draw comes from a third
     generator, rng_multi, so "single" output is identical whether or not it is passed,
     and switching to "duplicate" leaves the primary detections and the clutter unchanged.
+    The weeds draw from a fourth, rng_weeds, with the same one-uniform-one-noise-draw rule
+    per visible weed, so adding weeds leaves every plant detection and clutter return as
+    it was: the scan gains the weed detections and nothing else changes.
 
     Serves: [B1] the core of the simulator.
 
@@ -81,25 +94,33 @@ def sample_scan(
         rng_clutter: the "clutter" substream, for the Poisson count and clutter positions.
         multiplicity: the scenario's `sensor.multiplicity` block; default "single".
         rng_multi: the "multiplicity" substream. Required unless multiplicity is "single".
+        weed_model: the TRUTH sensor model for weeds (built from `sensor.weed_detection`),
+            supplying the weeds' p_D. Required when the truth has weeds.
+        rng_weeds: the "weed_detection" substream. Required when the truth has weeds.
 
     Returns:
         A tuple (scan, labels):
           * scan - what the filter receives, holding the REPORTED pose;
           * labels - the truth-side record of which detection came from which plant, which
-            plants were visible, which were detected and which were lost at the FOV edge.
+            plants were visible, which were detected and which were lost at the FOV edge,
+            and, with weeds, which detections came from which weed.
 
     Raises:
         ValueError: if multiplicity needs rng_multi and none is given, or its kind is
-            unknown.
+            unknown; or if the truth has weeds and weed_model or rng_weeds is missing.
     """
     if multiplicity.kind not in ("single", "duplicate", "poisson"):
         raise ValueError(f"unknown multiplicity kind {multiplicity.kind!r}")
     if multiplicity.kind != "single" and rng_multi is None:
         raise ValueError(f"multiplicity {multiplicity.kind!r} needs the rng_multi substream")
+    has_weeds = len(truth.weeds) > 0
+    if has_weeds and (weed_model is None or rng_weeds is None):
+        raise ValueError("the truth has weeds: sample_scan needs weed_model and rng_weeds")
 
     R = model.measurement.R
     z_list = []
     origin_list = []
+    weed_list = []
     visible_ids = []
     detected_ids = []
     truncated_ids = []
@@ -123,6 +144,7 @@ def sample_scan(
             detected_ids.append(int(plant_id))
             z_list.extend(kept)
             origin_list.extend([int(plant_id)] * len(kept))
+            weed_list.extend([None] * len(kept))
         elif generated:
             truncated_ids.append(int(plant_id))
 
@@ -130,6 +152,20 @@ def sample_scan(
     for z in sample_uniform_in_fov(pose, model.fov, n_clutter, rng_clutter):
         z_list.append(z)
         origin_list.append(None)
+        weed_list.append(None)
+
+    visible_weed_ids = []
+    for weed_id, w in enumerate(truth.weeds):
+        if not in_fov(w, pose, model.fov):
+            continue
+        visible_weed_ids.append(weed_id)
+        u = rng_weeds.random()
+        v = rng_weeds.multivariate_normal(np.zeros(R.shape[0]), R)
+        z = model.measurement.h(w, pose) + v
+        if u < weed_model.p_D(w, pose) and in_fov(z, pose, model.fov):
+            z_list.append(z)
+            origin_list.append(None)
+            weed_list.append(weed_id)
 
     order = sorted(range(len(z_list)), key=lambda i: tuple(z_list[i]))
     reported_pose = truth.poses[k].reported
@@ -145,6 +181,8 @@ def sample_scan(
         visible_ids=tuple(visible_ids),
         detected_ids=tuple(detected_ids),
         truncated_ids=tuple(truncated_ids),
+        weed_origin=tuple(weed_list[i] for i in order) if has_weeds else (),
+        visible_weed_ids=tuple(visible_weed_ids),
     )
     return scan, labels
 

@@ -102,22 +102,74 @@ class BernoulliExistenceReference(AnalyticReference):
     def r_sequence(self, events: Sequence[ScanEvent]) -> np.ndarray:
         """Evaluate the closed-form existence recursion over an event sequence. [B3]
 
-        TODO(human): document the three branches of this recursion, in terms of the
-        ScanEvent fields each one reads.
+        The branches below come from A2 (and from A0 for two or more detections), never from
+        `filters/bernoulli.py`. That independence is what makes B3 a cross-check.
 
-        Write out, as a docstring extension below this marker:
-          * the BIRTH branch     - what r is immediately after a component is born;
-          * the PREDICTION branch - how p_S and dt act on r between scans;
-          * the MISDETECTION branch - how r changes when the target is in the FOV but no
-            gated detection is assigned to it (this is the branch that makes a phantom's r
-            decay, so it is the one the B2 plot is really showing);
-          * the DETECTION branch  - how r changes when a gated detection is assigned,
-            including how the clutter explanation lambda_FA * c(z) competes with it;
-          * and what happens when `in_fov` is False, which is NOT the same as a
-            misdetection.
+        Order within one scan k (decision D3):
+          1. PREDICTION: r_pred = p_S * r_{k-1}. p_S is per scan, so dt does not enter;
+             with p_S = 1, r_pred = r_{k-1}. A2 has no prediction section: this is the
+             Bernoulli prediction without a birth term.
+          2. UPDATE of r_pred: exactly one of the four cases below.
+          3. BIRTH: at the birth scan only, and only into r = 0, r_k = r_birth [A2 §4]
+             (the configured constant standing in for A2 §4's e / (e + lambda_FA(z))). The
+             seeding detection does not update the new component that scan, so r at the
+             birth scan is exactly r_birth. Before the birth scan, r_k = 0.
+        There is no deletion. Compare a pruned bank track on its unpruned log (D14).
 
-        Also note any ScanEvent field your derivation needs that is not already there - the
-        current fields are k, dt, in_fov, p_D, lambda_FA, n_gated and n_clutter_gated.
+        Notation, per scan:
+          p_D      ScanEvent.p_D: the filter's assumed p_D at the predicted mean, the
+                   plug-in for p_D_bar = integral p_D(x) p(x) dx [A2 §2.1]. 0 out of view.
+          kappa_i  lambda_FA(z_i) = ScanEvent.lambda_FA * c(z_i), with c(z) = 1 / FOV area
+                   (D5): the clutter intensity at gated detection z_i [A0 §Measurement model].
+          ell_i    ell(z_i) = integral p_D(x) g(z_i|x) p(x) dx [A2 §3.1]; for the Gaussian
+                   prediction, p_D * N(z_i; z_hat, S). A likelihood, per m^2 like kappa_i,
+                   so ell_i / kappa_i is dimensionless.
+
+        IN VIEW, NO GATED DETECTION - misdetection [A2 §2]:
+            r_k = r_pred (1 - p_D) / (1 - r_pred p_D)
+
+        IN VIEW, ONE GATED DETECTION - r_marg of [A2 §3.1], the average over its two rows:
+            detected: weight r_pred ell_1,              r = 1
+            missed:   weight (1 - r_pred p_D) kappa_1,  r = the misdetection result above
+        which gives
+            r_k = (r_pred ell_1 + r_pred (1 - p_D) kappa_1)
+                  / (r_pred ell_1 + (1 - r_pred p_D) kappa_1)
+
+        IN VIEW, TWO OR MORE GATED DETECTIONS - A0 §Measurement model inside A2 §3.1's
+        two-branch existence; not yet its own derived section (decision D2; A2 §7 lists PDA
+        as open). Integrating A0's bracket (1 - p_D) + sum_i p_D g(z_i|x) / kappa_i over
+        p(x) gives
+            L   = (1 - p_D) + sum_i ell_i / kappa_i
+            r_k = r_pred L / ((1 - r_pred) + r_pred L)
+        A detection outside the gate counts as ell_i = 0.
+
+        OUT OF VIEW (in_fov is False): r_k = r_pred. The object was not looked at, so this
+        is not a misdetection; it is what every in-view formula gives at p_D = 0, where all
+        ell_i = 0.
+
+        All four cases are one statement in odds: r_k / (1 - r_k) = L * r_pred / (1 - r_pred),
+        with L = 1 - p_D for a miss, (1 - p_D) + ell_1 / kappa_1 for one detection, the sum
+        above for several, and 1 out of view.
+
+        Checks the recursion must pass, all from A2:
+          * r_pred = 1 gives r_k = 1 in every case: certainty is absorbing [A2 §2, §5].
+          * r_pred = 0.9, p_D = 0.9, a miss: r_k = 0.09 / 0.19 = 0.47 [A2 §2, numerically].
+          * ell_1 -> 0 turns the one-detection case into the misdetection case.
+          * kappa_1 -> 0 with a detection gives r_k = 1; r_k < 1 needs lambda_FA > 0
+            [A2 §3.1].
+          * The one-detection case is the n = 1 case of the several-detection form, and
+            the misdetection case is its n = 0 case.
+
+        ScanEvent fields:
+          read:      k, in_fov, p_D, lambda_FA, n_gated.
+          not read:  dt (p_S is per scan); n_clutter_gated (interpretation only).
+          MISSING, needed before this can be implemented (an interface change, so it is
+          decided with the author):
+            * the gated detections' ell_i / kappa_i, one per gated detection, e.g.
+              `likelihood_ratios: tuple[float, ...]`, so the detection cases can be
+              evaluated. Without it only miss, out-of-view and birth scans are checkable.
+            * a birth marker, e.g. `born: bool`, True at the birth scan: nothing in the
+              event sequence says where the birth is.
 
         Args:
             events: the per-scan event sequence, in increasing k.

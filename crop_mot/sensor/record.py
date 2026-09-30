@@ -97,5 +97,7 @@ def read_labels(path: Path) -> list[ScanLabels]:
             visible_ids=tuple(record["visible_ids"]),
             detected_ids=tuple(record["detected_ids"]),
             truncated_ids=tuple(record.get("truncated_ids", ())),
+            weed_origin=tuple(record.get("weed_origin", ())),
+            visible_weed_ids=tuple(record.get("visible_weed_ids", ())),
         ))
     return labels

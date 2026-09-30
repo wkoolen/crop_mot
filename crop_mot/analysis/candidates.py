@@ -8,6 +8,10 @@ A good phantom seed is a clutter detection in empty space: far enough from every
 that its gate cannot reach one (otherwise the phantom is captured, decision D9) and far
 enough from the other seeds that two tracks do not share detections (the bank's
 independence approximation).
+
+In a scenario with weeds (decision D15) a clutter detection is either transient (Poisson,
+drawn fresh each scan) or a weed's (recurring at the weed). Each candidate says which, so
+the two kinds of phantom can be seeded side by side.
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from crop_mot.analysis.counts import weed_origin
 from crop_mot.analysis.plots import load_run_folder_config
 from crop_mot.config import FieldOfView, RunConfig
 from crop_mot.runner.run_dir import RunDir
@@ -36,6 +41,7 @@ class PhantomCandidate:
         n_in_view_after: how many LATER scans have z inside the FOV at the scan's reported
             pose - an upper bound on how often the phantom can be looked at and missed.
             A small count means r will freeze rather than decay (p_D = 0 out of view).
+        weed_id: the weed the detection came from, or None for transient clutter.
     """
 
     k: int
@@ -43,6 +49,7 @@ class PhantomCandidate:
     z: np.ndarray
     plant_distance: float
     n_in_view_after: int
+    weed_id: int | None = None
 
 
 def phantom_candidates(
@@ -66,7 +73,8 @@ def phantom_candidates(
 
     found = []
     for scan, scan_labels in zip(scans, labels):
-        for i, (detection, origin) in enumerate(zip(scan.detections, scan_labels.origin)):
+        detections = zip(scan.detections, scan_labels.origin, weed_origin(scan_labels))
+        for i, (detection, origin, weed_id) in enumerate(detections):
             if origin is not None:
                 continue
             distance = float(np.min(np.linalg.norm(plants - detection.z, axis=1)))
@@ -76,7 +84,8 @@ def phantom_candidates(
                                   for later in scans[scan.k + 1:])
             found.append(PhantomCandidate(k=scan.k, detection_index=i, z=detection.z,
                                           plant_distance=distance,
-                                          n_in_view_after=n_in_view_after))
+                                          n_in_view_after=n_in_view_after,
+                                          weed_id=weed_id))
 
     kept: list[PhantomCandidate] = []
     for candidate in sorted(found, key=lambda c: -c.plant_distance):
@@ -96,8 +105,9 @@ def assumed_fov(run: RunDir) -> FieldOfView:
 
 def format_candidates(candidates: list[PhantomCandidate]) -> str:
     """A table for the terminal, ready to copy seeds from. [B2]"""
-    lines = ["   k  index            z        to plant  in view after"]
+    lines = ["   k  index            z        to plant  in view after  source"]
     for c in candidates:
+        source = "transient" if c.weed_id is None else f"weed {c.weed_id}"
         lines.append(f"{c.k:4d}  {c.detection_index:5d}  ({c.z[0]:5.2f}, {c.z[1]:5.2f})"
-                     f"  {c.plant_distance:7.2f} m  {c.n_in_view_after:6d} scans")
+                     f"  {c.plant_distance:7.2f} m  {c.n_in_view_after:6d} scans   {source}")
     return "\n".join(lines)

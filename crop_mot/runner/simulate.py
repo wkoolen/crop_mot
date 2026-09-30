@@ -18,7 +18,7 @@ from crop_mot.sensor.detector import sample_scan
 from crop_mot.sensor.models import build_measurement_model
 from crop_mot.sensor.record import write_detections, write_labels
 from crop_mot.sensor.sensor_model import build_sensor_model
-from crop_mot.world.field import generate_field
+from crop_mot.world.field import generate_field, generate_weeds
 from crop_mot.world.path import generate_path
 from crop_mot.world.truth import GroundTruth, write_truth
 
@@ -27,9 +27,10 @@ def simulate(cfg: ScenarioConfig, run: RunDir) -> None:
     """Generate a scenario and write it to a run folder. [B1]
 
     Steps:
-      1. Split the seed into named substreams (field / path / detection / clutter), so that
-         changing the detector cannot move the plants.
-      2. Generate the plant field and the robot path.
+      1. Split the seed into named substreams (field / path / detection / clutter / ...),
+         so that changing the detector cannot move the plants.
+      2. Generate the plant field, the weeds (none unless `world.weeds` is set) and the
+         robot path.
       3. For each scan, sample detections from the TRUE pose, producing both the Scan the
          filter will see and the ScanLabels it must not.
       4. Write truth.jsonl, labels.jsonl and detections.jsonl, then run_meta.json.
@@ -50,18 +51,26 @@ def simulate(cfg: ScenarioConfig, run: RunDir) -> None:
     streams = substreams(cfg.seed)
     field = generate_field(cfg.world, streams["field"])
     poses = generate_path(cfg.path, streams["path"])
-    truth = GroundTruth(field=field, poses=poses)
+    weeds = generate_weeds(cfg.world.weeds, streams["weeds"])
+    truth = GroundTruth(field=field, poses=poses, weeds=weeds)
 
     measurement = build_measurement_model(cfg.sensor.measurement)
     model = build_sensor_model(cfg.sensor.fov, cfg.sensor.detection, cfg.sensor.lambda_FA,
                                measurement)
+    # The weeds' own detection profile, with the same FOV and measurement model as the
+    # plants; its clutter rate is never read.
+    weed_model = None
+    if cfg.sensor.weed_detection is not None:
+        weed_model = build_sensor_model(cfg.sensor.fov, cfg.sensor.weed_detection, 0.0,
+                                        measurement)
 
     scans = []
     labels = []
     for k, sample in enumerate(poses):
         scan, label = sample_scan(truth, sample.true, k, sample.t, model,
                                   streams["detection"], streams["clutter"],
-                                  cfg.sensor.multiplicity, streams["multiplicity"])
+                                  cfg.sensor.multiplicity, streams["multiplicity"],
+                                  weed_model, streams["weed_detection"])
         scans.append(scan)
         labels.append(label)
 

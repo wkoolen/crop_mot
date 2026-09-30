@@ -46,18 +46,57 @@ class RowConfig:
 
 
 @dataclass(frozen=True)
+class RegionConfig:
+    """An axis-aligned rectangle in the world frame, in metres. [B1]"""
+
+    x_min: float
+    x_max: float
+    y_min: float
+    y_max: float
+
+    def area(self) -> float:
+        """Area of the rectangle in m^2."""
+        return (self.x_max - self.x_min) * (self.y_max - self.y_min)
+
+
+@dataclass(frozen=True)
+class WeedsConfig:
+    """Weeds: static non-plant objects the detector sometimes reports as plants. [B1]
+
+    PERSISTENT FALSE TARGETS (decision D15). Unlike the Poisson clutter, which is drawn
+    fresh every scan, a weed stays where it is, so the detector can report it again at the
+    same place whenever it is in view. How often it does is set by the truth sensor's
+    `weed_detection` block.
+
+    ASSUMPTION: weeds form a homogeneous Poisson point process over `region`: the count is
+    Poisson(density * region area) and each position is uniform over the rectangle. Drawn
+    from the "weeds" substream, so adding weeds moves no plant and changes no plant
+    detection or clutter return.
+
+    Attributes:
+        density: expected weeds per m^2 of the region.
+        region: the rectangle weeds are placed in.
+    """
+
+    density: float
+    region: RegionConfig
+
+
+@dataclass(frozen=True)
 class WorldConfig:
-    """The static field of plants. [B1]
+    """The static field of plants, and optionally weeds. [B1]
 
     Attributes:
         rows: the plant rows; the robot walks the lane between them.
         position_jitter_std: metres, standard deviation of planting irregularity applied to
             each nominal plant position. Drawn from the "field" substream, so it does not
             change when detector parameters change.
+        weeds: the weeds, or None for a field without any. Optional in the YAML.
     """
 
     rows: tuple[RowConfig, ...]
     position_jitter_std: float
+    weeds: WeedsConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -184,6 +223,10 @@ class SensorConfig:
         lambda_FA: expected number of clutter detections per scan (Poisson mean).
         measurement: measurement model and noise.
         multiplicity: detections per plant per scan. Optional in the YAML, default "single".
+        weed_detection: how often a visible weed is reported as a plant, in the same format
+            as `detection`. Required when the world has weeds and refused otherwise
+            (decision D15). The filter's assumed sensor has no counterpart, so a scenario
+            with weeds is a model-mismatch experiment.
     """
 
     fov: FieldOfView
@@ -191,6 +234,7 @@ class SensorConfig:
     lambda_FA: float
     measurement: MeasurementConfig
     multiplicity: MultiplicityConfig = MultiplicityConfig()
+    weed_detection: DetectionConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -577,8 +621,24 @@ def _parse_measurement(raw: Any, where: str) -> MeasurementConfig:
                              R=_as_matrix(raw["R"], f"{where}.R"))
 
 
+def _parse_region(raw: Any, where: str) -> RegionConfig:
+    _check_keys(raw, where, required={"x_min", "x_max", "y_min", "y_max"})
+    region = RegionConfig(**{key: _as_float(raw[key], f"{where}.{key}") for key in raw})
+    if not (region.x_min < region.x_max and region.y_min < region.y_max):
+        raise ValueError(f"{where}: need x_min < x_max and y_min < y_max")
+    return region
+
+
+def _parse_weeds(raw: Any, where: str) -> WeedsConfig:
+    _check_keys(raw, where, required={"density", "region"})
+    density = _as_float(raw["density"], f"{where}.density")
+    if density < 0.0:
+        raise ValueError(f"{where}.density: expected >= 0, got {density}")
+    return WeedsConfig(density=density, region=_parse_region(raw["region"], f"{where}.region"))
+
+
 def _parse_world(raw: Any, where: str) -> WorldConfig:
-    _check_keys(raw, where, required={"rows", "position_jitter_std"})
+    _check_keys(raw, where, required={"rows", "position_jitter_std"}, optional={"weeds"})
     if not isinstance(raw["rows"], list) or not raw["rows"]:
         raise ValueError(f"{where}.rows: expected a non-empty list")
     rows = []
@@ -593,7 +653,9 @@ def _parse_world(raw: Any, where: str) -> WorldConfig:
         ))
     return WorldConfig(rows=tuple(rows),
                        position_jitter_std=_as_float(raw["position_jitter_std"],
-                                                     f"{where}.position_jitter_std"))
+                                                     f"{where}.position_jitter_std"),
+                       weeds=(_parse_weeds(raw["weeds"], f"{where}.weeds")
+                              if "weeds" in raw else None))
 
 
 def _parse_path(raw: Any, where: str) -> PathConfig:
@@ -645,7 +707,7 @@ def _parse_multiplicity(raw: Any, where: str) -> MultiplicityConfig:
 
 def _parse_sensor(raw: Any, where: str) -> SensorConfig:
     _check_keys(raw, where, required={"fov", "detection", "lambda_FA", "measurement"},
-                optional={"multiplicity"})
+                optional={"multiplicity", "weed_detection"})
     detection = _parse_detection(raw["detection"], f"{where}.detection")
     multiplicity = (_parse_multiplicity(raw["multiplicity"], f"{where}.multiplicity")
                     if "multiplicity" in raw else MultiplicityConfig())
@@ -660,17 +722,28 @@ def _parse_sensor(raw: Any, where: str) -> SensorConfig:
         lambda_FA=_as_float(raw["lambda_FA"], f"{where}.lambda_FA"),
         measurement=_parse_measurement(raw["measurement"], f"{where}.measurement"),
         multiplicity=multiplicity,
+        weed_detection=(_parse_detection(raw["weed_detection"], f"{where}.weed_detection")
+                        if "weed_detection" in raw else None),
     )
 
 
 def _parse_scenario(raw: Any, where: str) -> ScenarioConfig:
     _check_keys(raw, where, required={"name", "seed", "world", "path", "sensor"})
+    world = _parse_world(raw["world"], f"{where}: world")
+    sensor = _parse_sensor(raw["sensor"], f"{where}: sensor")
+    # Weeds are split over two blocks - where they are (world) and how the detector sees
+    # them (sensor) - so a half-configured pair is caught here rather than half-ignored.
+    if (world.weeds is None) != (sensor.weed_detection is None):
+        raise ValueError(
+            f"{where}: world.weeds and sensor.weed_detection go together; give both for a "
+            f"field with weeds, or neither for one without"
+        )
     return ScenarioConfig(
         name=_as_str(raw["name"], f"{where}: name"),
         seed=_as_int(raw["seed"], f"{where}: seed"),
-        world=_parse_world(raw["world"], f"{where}: world"),
+        world=world,
         path=_parse_path(raw["path"], f"{where}: path"),
-        sensor=_parse_sensor(raw["sensor"], f"{where}: sensor"),
+        sensor=sensor,
     )
 
 

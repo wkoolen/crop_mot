@@ -186,7 +186,9 @@ Codebase/
 │   ├── b1_two_rows.yaml              B1 scenario: two plant rows, lane path, detector params
 │   ├── b1_two_rows_duplicate.yaml    B1 variant: detector returns extra hits per plant (multiplicity)
 │   ├── b1_two_rows_extended.yaml     B1 variant: plants as extended objects, Poisson hits (multiplicity)
-│   └── b2_bernoulli_phantom.yaml     B2 run: reuses the B1 scenario, Bernoulli on a clutter-born track
+│   ├── b1_two_rows_weeds.yaml        B1 variant: the same field plus weeds, persistent false targets (D15)
+│   ├── b2_bernoulli_phantom.yaml     B2 run: reuses the B1 scenario, Bernoulli on a clutter-born track
+│   └── b2_bernoulli_bank_weeds.yaml  B2 run: the bank's phantoms in the field with weeds (D15)
 │
 ├── crop_mot/
 │   ├── __init__.py                   version string only; imports nothing heavy

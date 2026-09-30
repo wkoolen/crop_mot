@@ -1,10 +1,14 @@
-# B1 scenario: two plant rows with the robot walking the lane between them.
+# B1 scenario: b1_two_rows with WEEDS - persistent false targets (decision D15).
+# Identical to b1_two_rows.yaml except for name, world.weeds and sensor.weed_detection. For
+# the same seed the plants, the plant detections and the Poisson clutter are exactly those
+# of b1_two_rows.yaml; the scans only gain the weed detections. Simulating both files is the
+# without / with weeds comparison.
 #
 # This file plus its seed defines the world completely. Every filter in B2/B4 runs on the
 # detections this scenario produces, so changing anything here invalidates a comparison -
 # make a new file instead of editing this one.
 
-name: b1_two_rows
+name: b1_two_rows_weeds
 seed: 42
 
 world:
@@ -15,8 +19,15 @@ world:
   # Planting irregularity, metres. This is what makes data association non-trivial:
   # on a perfectly regular grid, nearest-neighbour association would never be ambiguous.
   position_jitter_std: 0.03
-  # No weeds: this is the field WITHOUT weeds. b1_two_rows_weeds.yaml is the same field
-  # with them (optional world.weeds + sensor.weed_detection blocks).
+
+  # Weeds: static objects that are not plants. A homogeneous Poisson point process over the
+  # region - Poisson(density * area) weeds, each uniform over it - so they grow in the rows,
+  # in the lane and beside the rows alike. The region spans the lateral reach of the FOV
+  # (4.0 * sin(0.6) = 2.26 m) along the rows. With these values: 0.15 * 5 * 12 = 9 weeds
+  # expected; seed 42 draws 15.
+  weeds:
+    density: 0.15          # weeds per m^2
+    region: {x_min: -2.5, x_max: 2.5, y_min: 0.0, y_max: 12.0}
 
 path:
   kind: straight_lane
@@ -53,6 +64,13 @@ sensor:
     # occlusion_factor: 0.6
 
   lambda_FA: 2.0           # expected clutter detections per scan (Poisson mean)
+
+  # How often the detector reports a visible weed as a plant: the same block format as
+  # `detection`, and required exactly when world.weeds is set. Each scan is an independent
+  # coin flip, so what makes a weed different from the Poisson clutter above is only that
+  # it stays put. 0.5: a weed that looks like a crop plant half the time. The filter's
+  # assumed sensor has no counterpart - to the filter, a weed detection is clutter.
+  weed_detection: {kind: constant, p_D: 0.5}
 
   # Detections per plant per scan. Optional; 'single' is the default and the A0 point-target
   # assumption every phase-1 filter and the A2 closed form rely on. The other two kinds

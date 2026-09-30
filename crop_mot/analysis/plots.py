@@ -22,7 +22,7 @@ from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from matplotlib.patches import Ellipse, Patch, Wedge
 
-from crop_mot.analysis.counts import scan_counts
+from crop_mot.analysis.counts import scan_counts, weed_origin
 from crop_mot.analysis.estimates_log import (
     TrackLifetime,
     r_trajectory,
@@ -54,6 +54,14 @@ INK_SECONDARY = "#52514e"
 MUTED = "#898781"
 GRID = "#e1e0d9"
 SURFACE = "#ffffff"
+
+# Weeds (decision D15) get no hue of their own: the scene is a scatter, where only the first
+# three slots validate all-pairs. A weed detection is a false alarm, so it keeps the clutter
+# orange and is told apart by shape - a triangle, against the transient clutter's x - and a
+# weed itself is a hollow neutral triangle, as a plant is a hollow neutral circle. In the
+# stacked counts bars the weed segment is the clutter orange, hatched.
+WEED_MARKER = "^"
+WEED_HATCH = "////"
 
 # Half-width of the Monte-Carlo confidence band, in standard errors of the mean.
 MC_BAND_SE = 3.0
@@ -110,7 +118,7 @@ def _fov_wedge(pose, fov, **style) -> Wedge:
 
 
 def _draw_field(ax, truth, robot_at: int | None = None) -> None:
-    """The robot path, the plants and optionally the robot at one scan - scene context."""
+    """The robot path, the plants, any weeds and optionally the robot at one scan."""
     path = np.array([[sample.true.x, sample.true.y] for sample in truth.poses])
     ax.plot(path[:, 0], path[:, 1], color=INK, linewidth=2.0, label="robot path")
     if robot_at is not None:
@@ -120,6 +128,10 @@ def _draw_field(ax, truth, robot_at: int | None = None) -> None:
     plants = truth.field.positions
     ax.plot(plants[:, 0], plants[:, 1], marker="o", markersize=6, linestyle="none",
             markerfacecolor="none", markeredgecolor=INK_SECONDARY, label="plants (truth)")
+    if len(truth.weeds):
+        ax.plot(truth.weeds[:, 0], truth.weeds[:, 1], marker=WEED_MARKER, markersize=8,
+                linestyle="none", markerfacecolor="none", markeredgecolor=INK_SECONDARY,
+                markeredgewidth=1.2, label="weeds (truth)")
 
 
 def plot_scene(run: RunDir, out: Path, k: int = 0) -> Path:
@@ -128,7 +140,8 @@ def plot_scene(run: RunDir, out: Path, k: int = 0) -> Path:
     The sanity-check figure for B1, and the one that catches geometry bugs fastest: plants
     as points, the robot path as a line, the FOV wedge at a chosen scan, and that scan's
     detections. Clutter and true detections are distinguishable here because this is
-    evaluation code and may read labels.jsonl.
+    evaluation code and may read labels.jsonl; so are weed detections and transient
+    clutter, for a scenario with weeds.
 
     Args:
         run: the run folder to read from.
@@ -154,14 +167,19 @@ def plot_scene(run: RunDir, out: Path, k: int = 0) -> Path:
                             label=f"FOV at scan {k}"))
     _draw_field(ax, truth, robot_at=k)
 
-    real = np.array([d.z for d, o in zip(scan.detections, labels.origin) if o is not None])
-    clutter = np.array([d.z for d, o in zip(scan.detections, labels.origin) if o is None])
+    sources = list(zip(scan.detections, labels.origin, weed_origin(labels)))
+    real = np.array([d.z for d, o, _ in sources if o is not None])
+    clutter = np.array([d.z for d, o, w in sources if o is None and w is None])
+    weed = np.array([d.z for d, _, w in sources if w is not None])
     if len(real):
         ax.plot(real[:, 0], real[:, 1], marker="o", markersize=6, color=SERIES_1,
                 linestyle="none", label="detection from a plant")
     if len(clutter):
         ax.plot(clutter[:, 0], clutter[:, 1], marker="X", markersize=9, color=SERIES_2,
                 markeredgecolor=SURFACE, linestyle="none", label="clutter detection")
+    if len(weed):
+        ax.plot(weed[:, 0], weed[:, 1], marker=WEED_MARKER, markersize=9, color=SERIES_2,
+                markeredgecolor=SURFACE, linestyle="none", label="detection from a weed")
 
     ax.set_aspect("equal")
     ax.set_xlabel("x [m]")
@@ -174,8 +192,9 @@ def plot_scene(run: RunDir, out: Path, k: int = 0) -> Path:
 def plot_counts(run: RunDir, out: Path) -> Path:
     """Clairvoyant per-scan counts: detections received against plants in view. [B1]
 
-    Each scan's detections as a stacked bar, split by true origin (from a plant / clutter),
-    with the number of plants inside the FOV drawn as a line on the same count axis. The
+    Each scan's detections as a stacked bar, split by true origin (from a plant / clutter,
+    and for a scenario with weeds, clutter from a weed as a hatched segment on top), with
+    the number of plants inside the FOV drawn as a line on the same count axis. The
     gap between the line and the plant-origin bar is the misses plus the FOV-edge losses;
     once multiplicity is on, the plant-origin bar can rise above the line. Evaluation code,
     so it reads labels.jsonl. Works on a simulate-only run folder.
@@ -192,14 +211,21 @@ def plot_counts(run: RunDir, out: Path) -> Path:
     counts = scan_counts(read_labels(run.labels))
     k = np.array([c.k for c in counts])
     from_plants = np.array([c.n_object_detections for c in counts])
-    clutter = np.array([c.n_clutter for c in counts])
+    clutter = np.array([c.n_transient for c in counts])
+    weed = np.array([c.n_weed for c in counts])
     visible = np.array([c.n_visible for c in counts])
 
     fig, (ax,) = _new_figure()
     # A surface-coloured edge keeps a visible gap between adjacent bars and segments.
     bar = {"width": 0.9, "edgecolor": SURFACE, "linewidth": 1.0}
     ax.bar(k, from_plants, color=SERIES_1, label="detections from plants", **bar)
-    ax.bar(k, clutter, bottom=from_plants, color=SERIES_2, label="clutter detections", **bar)
+    weeds = any(c.n_visible_weeds for c in counts)
+    ax.bar(k, clutter, bottom=from_plants, color=SERIES_2,
+           label="transient clutter" if weeds else "clutter detections", **bar)
+    if weeds:
+        # The hatch is drawn in the edge colour, so the stripes are surface-coloured.
+        ax.bar(k, weed, bottom=from_plants + clutter, color=SERIES_2, hatch=WEED_HATCH,
+               label="clutter from weeds", **bar)
     ax.plot(k, visible, color=INK, linewidth=2.0, solid_joinstyle="round",
             solid_capstyle="round", label="plants in FOV (truth)")
 
@@ -478,7 +504,7 @@ def _hypotheses_figure(n_tracks: int) -> tuple[Figure, object, list]:
     return fig, scene, rows
 
 
-def _hypotheses_legend(ax, r_min: float, animated: bool) -> None:
+def _hypotheses_legend(ax, r_min: float, animated: bool, weeds: bool) -> None:
     """One legend for the scene and the rows, built from proxies so every frame matches."""
     def marker(label, **style):
         return Line2D([], [], linestyle="none", label=label, **style)
@@ -491,6 +517,15 @@ def _hypotheses_legend(ax, r_min: float, animated: bool) -> None:
                alpha=1.0 if animated else 0.35),
         marker("clutter detection", marker="X", markersize=6, color=SERIES_2,
                alpha=1.0 if animated else 0.55),
+    ]
+    if weeds:
+        handles += [
+            marker("weeds (truth)", marker=WEED_MARKER, markersize=8, markerfacecolor="none",
+                   markeredgecolor=INK_SECONDARY, markeredgewidth=1.2),
+            marker("detection from a weed", marker=WEED_MARKER, markersize=6, color=SERIES_2,
+                   alpha=1.0 if animated else 0.55),
+        ]
+    handles += [
         marker("birth (seed detection)", marker="D", markersize=7, color=SERIES_3,
                markeredgecolor=SURFACE),
         Line2D([], [], color=SERIES_1, linewidth=2.0, marker="o", markersize=6,
@@ -540,8 +575,12 @@ def _draw_hypotheses(data: _HypothesesData, scene, rows, k_now: int, animated: b
     _draw_field(scene, data.truth, robot_at=k_now if animated else None)
 
     for scan, scan_labels in detection_scans:
-        for detection, origin in zip(scan.detections, scan_labels.origin):
-            if origin is None:
+        for detection, origin, weed in zip(scan.detections, scan_labels.origin,
+                                           weed_origin(scan_labels)):
+            if weed is not None:
+                scene.plot(*detection.z[:2], marker=WEED_MARKER, markersize=6, color=SERIES_2,
+                           markeredgewidth=0, alpha=detection_alpha[1], linestyle="none")
+            elif origin is None:
                 scene.plot(*detection.z[:2], marker="X", markersize=6, color=SERIES_2,
                            markeredgewidth=0, alpha=detection_alpha[1], linestyle="none")
             else:
@@ -558,7 +597,7 @@ def _draw_hypotheses(data: _HypothesesData, scene, rows, k_now: int, animated: b
     scene.set_ylabel("y [m]")
     when = f"after scan {k_now}" if animated else f"over {n_scans} scans"
     scene.set_title(f"Phantom hypotheses {when}: {data.cfg.name}", color=INK, fontsize=11)
-    _hypotheses_legend(scene, data.r_min, animated)
+    _hypotheses_legend(scene, data.r_min, animated, weeds=len(data.truth.weeds) > 0)
 
     rows[-1].set_xlabel("scan k")
     rows[-1].set_xlim(-0.5, n_scans - 0.5)

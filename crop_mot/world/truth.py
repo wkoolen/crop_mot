@@ -7,7 +7,7 @@ ever given a path to it, and no filter function takes a GroundTruth argument - t
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field as dataclass_field
 from pathlib import Path
 
 import numpy as np
@@ -25,10 +25,13 @@ class GroundTruth:
     Attributes:
         field: the true plant positions.
         poses: the per-scan true and reported poses.
+        weeds: shape (n_weeds, 2), the true weed positions; a weed's id is its row index.
+            Shape (0, 2) for a field without weeds (decision D15).
     """
 
     field: PlantField
     poses: list[PoseSample]
+    weeds: np.ndarray = dataclass_field(default_factory=lambda: np.empty((0, 2)))
 
 
 def write_truth(path: Path, truth: GroundTruth) -> None:
@@ -44,14 +47,18 @@ def write_truth(path: Path, truth: GroundTruth) -> None:
         path: destination truth.jsonl.
         truth: the bundle to serialise.
 
-    Layout: the first line is the plant field ({"kind": "field", ...}); every following line
-    is one scan's poses ({"kind": "pose", "k", "t", "true", "reported"}).
+    Layout: the first line is the plant field ({"kind": "field", ...}), the second the weeds
+    ({"kind": "weeds", "positions"}, an empty list for a field without weeds); every
+    following line is one scan's poses ({"kind": "pose", "k", "t", "true", "reported"}).
     """
     records = [{
         "kind": "field",
         "ids": truth.field.ids,
         "positions": truth.field.positions,
         "row_index": truth.field.row_index,
+    }, {
+        "kind": "weeds",
+        "positions": truth.weeds,
     }]
     for k, sample in enumerate(truth.poses):
         records.append({
@@ -74,9 +81,11 @@ def read_truth(path: Path) -> GroundTruth:
         path: source truth.jsonl.
 
     Returns:
-        The deserialised ground truth.
+        The deserialised ground truth. A truth.jsonl written before weeds existed has no
+        weeds record and reads back with no weeds.
     """
     field = None
+    weeds = np.empty((0, 2))
     poses = []
     for record in read_jsonl(path):
         if record["kind"] == "field":
@@ -85,9 +94,11 @@ def read_truth(path: Path) -> GroundTruth:
                 positions=np.asarray(record["positions"], dtype=float).reshape(-1, 2),
                 row_index=np.asarray(record["row_index"], dtype=int),
             )
+        elif record["kind"] == "weeds":
+            weeds = np.asarray(record["positions"], dtype=float).reshape(-1, 2)
         else:
             poses.append(PoseSample(t=record["t"], true=Pose2D(**record["true"]),
                                     reported=Pose2D(**record["reported"])))
     if field is None:
         raise ValueError(f"{path}: no field record")
-    return GroundTruth(field=field, poses=poses)
+    return GroundTruth(field=field, poses=poses, weeds=weeds)

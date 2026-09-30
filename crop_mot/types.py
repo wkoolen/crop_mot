@@ -131,6 +131,13 @@ class ScanLabels:
             every z it produced fell outside the FOV (decision D4). Lets the evaluation
             tell this edge loss apart from an ordinary p_D miss; both are in
             visible_ids - detected_ids. Defaults to empty so older labels.jsonl files load.
+        weed_origin: which clutter detections came from a weed (decision D15). Either
+            empty - the scenario has no weeds - or one entry per detection in the same
+            order as `origin`: the weed id, or None. A weed detection's `origin` is None,
+            because to a filter tracking plants it is a false alarm like any other; this
+            field only separates the recurring kind from the Poisson kind. Read it through
+            `crop_mot.analysis.counts.weed_origin`, which expands the empty form.
+        visible_weed_ids: weed ids inside the FOV this scan (whether reported or not).
     """
 
     k: int
@@ -138,6 +145,8 @@ class ScanLabels:
     visible_ids: tuple[int, ...]
     detected_ids: tuple[int, ...]
     truncated_ids: tuple[int, ...] = ()
+    weed_origin: tuple[int | None, ...] = ()
+    visible_weed_ids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)

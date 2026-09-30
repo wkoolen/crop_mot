@@ -57,6 +57,8 @@ python3 -m crop_mot analyse  --run runs/<stamp>_b2_bernoulli_phantom_seed42
 python3 -m crop_mot candidates --run runs/<stamp>_b1_two_rows_seed42 --min-distance 1.0  # B2: phantom seeds
 python3 -m crop_mot track    --config configs/b2_bernoulli_bank_phantoms.yaml  # B2: several phantoms, pruned
 python3 -m crop_mot analyse  --run runs/<stamp>_b2_bernoulli_bank_phantoms_seed42 --plots hypotheses hypotheses_anim
+python3 -m crop_mot simulate --config configs/b1_two_rows_weeds.yaml     # B1 with weeds: same field + persistent false targets
+python3 -m crop_mot track    --config configs/b2_bernoulli_bank_weeds.yaml  # B2: the same phantoms, in the field with weeds
 python3 -m pytest tests -q
 ```
 
