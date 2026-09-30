@@ -183,3 +183,30 @@ def nees_band(n_pairs: np.ndarray, dim: int, prob: float = 0.95) -> tuple[np.nda
         lower = np.where(n > 0, chi2.ppf(tail, n * dim) / n, np.nan)
         upper = np.where(n > 0, chi2.ppf(1.0 - tail, n * dim) / n, np.nan)
     return lower, upper
+
+
+def existence_density(tracks: list[TrackEstimate] | tuple[TrackEstimate, ...],
+                      xs: np.ndarray, ys: np.ndarray) -> np.ndarray:
+    """D(x) = sum_i r_i N(x; m_i, P_i) on a grid: the PHD of any filter's output. [B4, step 5]
+
+    Integrates to the sum of r over the tracks, the expected number of objects, so every
+    method can be drawn as the same kind of heatmap; the PHD grid filter (roadmap step 14)
+    will draw its own grid on the same axes.
+
+    Args:
+        tracks: the tracks to sum, with 2D means.
+        xs: shape (nx,), grid x coordinates in metres.
+        ys: shape (ny,), grid y coordinates in metres.
+
+    Returns:
+        Shape (ny, nx), the density in objects per m^2.
+    """
+    grid = np.stack(np.meshgrid(xs, ys), axis=-1)            # (ny, nx, 2)
+    density = np.zeros(grid.shape[:2])
+    for track in tracks:
+        d = grid - track.mean[:2]
+        P = track.cov[:2, :2]
+        mahalanobis_sq = np.einsum("...i,ij,...j->...", d, np.linalg.inv(P), d)
+        normaliser = 2.0 * np.pi * np.sqrt(np.linalg.det(P))
+        density += track.r * np.exp(-0.5 * mahalanobis_sq) / normaliser
+    return density

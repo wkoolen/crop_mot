@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 import yaml
 from matplotlib.animation import PillowWriter
-from matplotlib.colors import to_rgba
+from matplotlib.colors import LinearSegmentedColormap, PowerNorm, to_rgba
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from matplotlib.patches import Ellipse, Patch, Wedge
@@ -29,6 +29,7 @@ from crop_mot.analysis.evaluation import (
     GOSPA_P,
     R_CONF,
     cardinality,
+    existence_density,
     gospa_series,
     nees,
     nees_band,
@@ -532,6 +533,141 @@ def plot_nees(run: RunDir, filter_name: str, out: Path) -> Path:
     ax_n.yaxis.set_major_locator(MaxNLocator(integer=True))
     ax_n.set_ylabel("pairs n")
     _time_axis(ax_n, len(k))
+    return _save(fig, out)
+
+
+# The palette's blue ramp from the surface to step 700: one hue, light to dark, for the
+# existence map's magnitude. Zero recedes into the surface.
+EXISTENCE_CMAP = LinearSegmentedColormap.from_list(
+    "existence", [SURFACE, "#cde2fb", "#86b6ef", "#3987e5", "#1c5cab", "#0d366b"])
+# Grid spacing of the existence map, metres.
+EXISTENCE_GRID_STEP = 0.05
+
+
+def _map_limits(truth, tracks, extra: np.ndarray | None = None,
+                margin: float = 0.6) -> tuple[tuple[float, float], ...]:
+    """Scene limits covering the path, plants, weeds, extra points and every track's
+    2-sigma ellipse."""
+    points = [np.array([[sample.true.x, sample.true.y] for sample in truth.poses]),
+              truth.field.positions[:, :2], truth.weeds.reshape(-1, 2)]
+    if extra is not None:
+        points.append(extra)
+    for track in tracks:
+        reach = ELLIPSE_SIGMA * np.sqrt(np.diag(track.cov[:2, :2]))
+        points.append(np.array([track.mean[:2] - reach, track.mean[:2] + reach]))
+    points = np.vstack(points)
+    return ((points[:, 0].min() - margin, points[:, 0].max() + margin),
+            (points[:, 1].min() - margin, points[:, 1].max() + margin))
+
+
+def _scan_or_last(records, k: int | None) -> int:
+    return len(records) - 1 if k is None else k
+
+
+def plot_tracks(run: RunDir, filter_name: str, out: Path, k: int | None = None) -> Path:
+    """Every track on the scene at one scan, ellipse opacity set by r. [B4, step 5]
+
+    Generalises the hypotheses figure, whose one row per track does not scale to a mapped
+    field of about 70 plants: here each track is only its 2-sigma ellipse and mean, as
+    opaque as it is likely to exist. Reads only the run folder.
+
+    Args:
+        run: the run folder.
+        filter_name: which estimates log to read.
+        out: destination PNG path.
+        k: the scan to show; None means the last scan, the final map.
+
+    Returns:
+        The path written.
+    """
+    cfg = load_run_config(run.config)
+    truth = read_truth(run.truth)
+    records = read_estimates(run.estimates(filter_name))
+    k = _scan_or_last(records, k)
+    tracks = records[k].estimates
+    wedge = _fov_wedge(truth.poses[k].true, cfg.scenario.sensor.fov,
+                       facecolor=to_rgba(SERIES_1, 0.06), edgecolor=MUTED,
+                       label=f"FOV at scan {k}")
+
+    fig, (ax,) = _new_figure(height=6.0)
+    ax.add_patch(wedge)
+    _draw_field(ax, truth, robot_at=k)
+    for track in tracks:
+        opacity = float(np.clip(track.r, 0.05, 1.0))
+        ax.add_patch(_ellipse(track.mean[:2], track.cov[:2, :2], edgecolor=SERIES_1,
+                              alpha=opacity))
+        ax.plot(*track.mean[:2], marker="o", markersize=4, color=SERIES_1, alpha=opacity,
+                linestyle="none")
+    for r in (1.0, 0.25):
+        ax.add_patch(Ellipse((np.nan, np.nan), 1, 1, fill=False, linewidth=1.5,
+                             edgecolor=SERIES_1, alpha=r,
+                             label=f"track, {ELLIPSE_SIGMA:g}σ ellipse, r = {r:g}"))
+
+    pose, fov = truth.poses[k].true, cfg.scenario.sensor.fov
+    bearings = pose.theta + np.linspace(-fov.half_angle, fov.half_angle, 9)
+    arc = np.column_stack([pose.x + fov.max_range * np.cos(bearings),
+                           pose.y + fov.max_range * np.sin(bearings)])
+    (x0, x1), (y0, y1) = _map_limits(truth, tracks, extra=arc)
+    ax.set_xlim(x0, x1)
+    ax.set_ylim(y0, y1)
+    ax.set_aspect("equal")
+    ax.set_xlabel("x [m]")
+    ax.set_ylabel("y [m]")
+    ax.set_title(f"Tracks at scan {k}, {filter_name}: {len(tracks)} reported", color=INK,
+                 fontsize=11)
+    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), frameon=False, fontsize=9)
+    return _save(fig, out)
+
+
+def plot_existence_map(run: RunDir, filter_name: str, out: Path, k: int | None = None) -> Path:
+    """The existence map D(x) = sum_i r_i N(x; m_i, P_i) at one scan. [B4, step 5]
+
+    The PHD of the filter's reported tracks, as a heatmap on the palette's one-hue ramp,
+    with the true plants and the robot path on top. It integrates to the sum of r, given
+    in the title, so methods with and without identities are drawn alike.
+
+    Args:
+        run: the run folder.
+        filter_name: which estimates log to read.
+        out: destination PNG path.
+        k: the scan to show; None means the last scan, the final map.
+
+    Returns:
+        The path written.
+    """
+    truth = read_truth(run.truth)
+    records = read_estimates(run.estimates(filter_name))
+    k = _scan_or_last(records, k)
+    tracks = records[k].estimates
+    (x0, x1), (y0, y1) = _map_limits(truth, tracks)
+    xs = np.arange(x0, x1 + EXISTENCE_GRID_STEP, EXISTENCE_GRID_STEP)
+    ys = np.arange(y0, y1 + EXISTENCE_GRID_STEP, EXISTENCE_GRID_STEP)
+    density = existence_density(tracks, xs, ys)
+
+    fig = Figure(figsize=(5.4, 6.8), facecolor=SURFACE, layout="constrained")
+    ax = fig.subplots()
+    _style_axes(ax)
+    ax.grid(False)
+    # Square-root colour scale: a converged track peaks near 100 per m^2, and on a linear
+    # scale everything with less mass would vanish. The colorbar carries the true values.
+    image = ax.imshow(density, origin="lower", extent=(xs[0], xs[-1], ys[0], ys[-1]),
+                      cmap=EXISTENCE_CMAP, norm=PowerNorm(gamma=0.5, vmin=0.0),
+                      interpolation="nearest")
+    colorbar = fig.colorbar(image, ax=ax, shrink=0.8)
+    colorbar.set_label("D(x) [objects per m²], square-root scale", color=INK_SECONDARY)
+    colorbar.ax.tick_params(colors=INK_SECONDARY, labelsize=9)
+    _draw_field(ax, truth)
+
+    ax.set_xlim(x0, x1)
+    ax.set_ylim(y0, y1)
+    ax.set_aspect("equal")
+    ax.set_xlabel("x [m]")
+    ax.set_ylabel("y [m]")
+    total = sum(track.r for track in tracks)
+    ax.set_title(f"Existence map at scan {k}, {filter_name}\nsum of r = {total:.2f}",
+                 color=INK, fontsize=11)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.08), frameon=False, fontsize=9,
+              ncols=3)
     return _save(fig, out)
 
 

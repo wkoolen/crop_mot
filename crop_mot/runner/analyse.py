@@ -27,6 +27,7 @@ from crop_mot.analysis.plots import (
     load_run_folder_config,
     plot_cardinality,
     plot_counts,
+    plot_existence_map,
     plot_gospa,
     plot_hypotheses,
     plot_nees,
@@ -34,6 +35,7 @@ from crop_mot.analysis.plots import (
     plot_r_vs_analytic,
     plot_r_vs_k,
     plot_scene,
+    plot_tracks,
 )
 from crop_mot.config import RunConfig, ScenarioConfig
 from crop_mot.io import to_jsonable
@@ -41,9 +43,11 @@ from crop_mot.runner.run_dir import RunDir
 
 # Every plot `analyse` knows how to draw, as named in the config's `analysis.plots`.
 PLOT_NAMES = ("scene", "counts", "r_vs_k", "hypotheses", "hypotheses_anim", "r_vs_analytic",
-              "r_montecarlo", "cardinality", "gospa", "nees")
+              "r_montecarlo", "tracks", "existence_map", "cardinality", "gospa", "nees")
 # The step-5 figures that work for any filter: each reads only (run, filter_name).
 ANY_FILTER_PLOTS = {
+    "tracks": plot_tracks,
+    "existence_map": plot_existence_map,
     "cardinality": plot_cardinality,
     "gospa": plot_gospa,
     "nees": plot_nees,

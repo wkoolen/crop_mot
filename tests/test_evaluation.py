@@ -15,6 +15,7 @@ from scipy.stats import chi2
 from crop_mot.analysis.evaluation import (
     ScanView,
     cardinality,
+    existence_density,
     gospa_series,
     nees,
     nees_band,
@@ -62,6 +63,17 @@ def test_nees_band_is_the_averaged_chi_square() -> None:
     assert lower[0] == pytest.approx(chi2.ppf(0.025, 2))
     assert upper[1] == pytest.approx(chi2.ppf(0.975, 20) / 10)
     assert np.isnan(lower[2]) and np.isnan(upper[2])
+
+
+def test_existence_density_integrates_to_the_sum_of_r() -> None:
+    """D(x) = sum r_i N(x; m_i, P_i) holds sum r objects; zero with no track. [B4]"""
+    xs = np.arange(-1.0, 1.0, 0.01)
+    ys = np.arange(0.0, 3.0, 0.01)
+    tracks = [_track(0, 0.7, [0.0, 1.0], 0.01), _track(1, 0.2, [0.2, 2.0], 0.02)]
+    density = existence_density(tracks, xs, ys)
+    assert density.shape == (len(ys), len(xs))
+    assert density.sum() * 0.01**2 == pytest.approx(0.9, rel=1e-3)
+    assert not existence_density([], xs, ys).any()
 
 
 @pytest.fixture(scope="module")
