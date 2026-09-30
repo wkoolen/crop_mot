@@ -647,13 +647,19 @@ Carry these until they are decided, then move each answer into DECISIONS.md.
    Decided: `likelihood_ratios` and `born` (D25).
 2. ~~Passing (mean, cov) instead of means to `build_scan_events` (step 3).~~ Decided:
    approved by the author on 2026-09-30 (D25).
-3. Which p_D form A2 claims, and which option (A to D) the filter uses (step 3b).
-4. The fate thresholds r_conf and d_match, and the injection position and scan for the
-   controlled phantom (step 4a).
-5. The timing log format: a separate file (recommended) or a field in the estimates log
-   (step 4c).
-6. The association figure and association-accuracy metric, and the diagnostics channel
-   both need (steps 5 and 7).
+3. ~~Which p_D form A2 claims, and which option (A to D) the filter uses (step 3b).~~
+   Decided: A2 claims p_D_bar; the filter keeps option A, C is the next brick (D27).
+4. ~~The fate thresholds r_conf and d_match, and the injection position and scan for the
+   controlled phantom (step 4a).~~ Decided: r_conf = 0.5, d_match = 0.2 m, D8's phantom
+   (D28).
+5. ~~The timing log format: a separate file (recommended) or a field in the estimates log
+   (step 4c).~~ Decided: a separate file (D29).
+6. ~~The association figure and association-accuracy metric, and the diagnostics channel
+   both need (steps 5 and 7).~~ Decided: deferred to step 11 (D30).
+
+Questions 3 to 6 were answered by Claude at the author's request on 2026-09-30 ("keep
+everything as documented and build complexity brick by brick"); 7 to 12 stay open until
+their steps.
 7. The detection `label` field, the confusion matrix config, and the derivation for the
    imperfect classifier (step 8b).
 8. The prior r_0 per slot, and how the simulator places missing plants (step 8c).
