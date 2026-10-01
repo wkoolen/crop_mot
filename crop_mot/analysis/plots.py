@@ -1597,7 +1597,7 @@ def _existence_movie_legend(ax, movie: _ExistenceMovie) -> None:
     if len(movie.truth.field.missing_positions):
         handles.append(marker("empty slot (truth)", marker=EMPTY_SLOT_MARKER, markersize=7,
                               markerfacecolor="none", markeredgecolor=SERIES_2))
-    ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, -0.06),
+    ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, -0.1),
               frameon=False, fontsize=8, ncols=2)
 
 
