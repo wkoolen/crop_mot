@@ -52,7 +52,7 @@ def test_the_shipped_fates_config_injects_d28s_phantom() -> None:
     birth = load_run_config(CONFIGS / "b2_phantom_fates.yaml").filter_cfg.birth
     assert birth.kind == "injected" and birth.detection_index == -1
     assert birth.at_scan == 24 and birth.r_b == 0.08
-    assert np.array_equal(birth.position, [1.94, 4.82])
+    assert np.array_equal(birth.position, [1.94, 1.82])
 
 
 def test_an_injected_bank_is_the_injected_single_filter(
@@ -103,8 +103,12 @@ def test_fate_proportions_split_by_a_weed_in_the_gate() -> None:
     assert shares["no_weed_in_gate"]["confirmed_on_plant"].n == 2
 
 
-def test_seed_42_phantom_ends_on_a_weed(tmp_path) -> None:
-    """The shipped experiment's own seed: D15 measured this phantom locking onto a weed."""
+def test_seed_42_phantom_ends_on_a_plant(tmp_path) -> None:
+    """The shipped experiment's own seed: a plant captures the phantom, no weed in its gate.
+
+    In the field before D44 this seed's phantom locked onto a weed (D15); the weeds moved
+    with the field.
+    """
     cwd = os.getcwd()
     os.chdir(REPO_ROOT)  # the config's scenario path is relative to the repo root
     try:
@@ -112,5 +116,5 @@ def test_seed_42_phantom_ends_on_a_weed(tmp_path) -> None:
     finally:
         os.chdir(cwd)
     outcome = phantom_outcome(run, load_run_config(run.config))
-    assert outcome.fate == "confirmed_on_weed"
-    assert outcome.n_weed_in_gate > 0 and outcome.d_weed < outcome.d_plant
+    assert outcome.fate == "confirmed_on_plant"
+    assert outcome.n_weed_in_gate == 0 and outcome.d_plant < outcome.d_weed

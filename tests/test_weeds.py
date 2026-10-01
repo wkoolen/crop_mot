@@ -210,7 +210,7 @@ def test_shipped_weed_configs_load() -> None:
 
     run = load_run_config(CONFIGS / "b2_bernoulli_bank_weeds.yaml")
     assert run.scenario.name == "b1_two_rows_weeds"
-    assert len(run.filter_cfg.birth.seeds) == 5
+    assert len(run.filter_cfg.birth.seeds) == 8
 
 
 def test_phantom_born_on_a_weed_is_confirmed(tiny_run_config: RunConfig) -> None:

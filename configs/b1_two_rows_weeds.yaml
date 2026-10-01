@@ -13,9 +13,10 @@ seed: 42
 
 world:
   # Rows run parallel to +y; the robot walks up the lane at x = 0 between them.
+  # 25 plants per row, 50 in all.
   rows:
-    - {x: -0.75, y_start: 0.0, y_end: 12.0, spacing: 0.35}
-    - {x:  0.75, y_start: 0.0, y_end: 12.0, spacing: 0.35}
+    - {x: -0.75, y_start: 0.0, y_end: 8.4, spacing: 0.35}
+    - {x:  0.75, y_start: 0.0, y_end: 8.4, spacing: 0.35}
   # Planting irregularity, metres. This is what makes data association non-trivial:
   # on a perfectly regular grid, nearest-neighbour association would never be ambiguous.
   position_jitter_std: 0.03
@@ -23,19 +24,22 @@ world:
   # Weeds: static objects that are not plants. A homogeneous Poisson point process over the
   # region - Poisson(density * area) weeds, each uniform over it - so they grow in the rows,
   # in the lane and beside the rows alike. The region spans the lateral reach of the FOV
-  # (4.0 * sin(0.6) = 2.26 m) along the rows. With these values: 0.15 * 5 * 12 = 9 weeds
-  # expected; seed 42 draws 15.
+  # (4.0 * sin(0.6) = 2.26 m) along the rows. With these values: 0.15 * 5 * 8.4 = 6.3 weeds
+  # expected; seed 42 draws 10.
   weeds:
     density: 0.15          # weeds per m^2
-    region: {x_min: -2.5, x_max: 2.5, y_min: 0.0, y_max: 12.0}
+    region: {x_min: -2.5, x_max: 2.5, y_min: 0.0, y_max: 8.4}
 
 path:
   kind: straight_lane
   x: 0.0
-  y_start: -1.0
+  # A plant 0.75 m beside the lane is in view while the robot is 1.10 to 3.93 m short of
+  # it (half_angle, max_range), so starting 4 m before the rows gives the first plants
+  # their full pass.
+  y_start: -4.0
   heading: 1.5707963       # +y, radians
   speed: 0.4               # m/s
-  n_scans: 60
+  n_scans: 90              # ends at y = 4.9: all plants seen, those up to y = 6 for a full pass
   scan_period: 0.25        # s; the runner derives dt from the scan timestamps
 
   # Pose-known switch. TRUE means the reported pose IS the true pose, which is the

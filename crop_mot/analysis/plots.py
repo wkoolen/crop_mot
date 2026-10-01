@@ -871,7 +871,7 @@ def plot_tracks(run: RunDir, filter_name: str, out: Path, k: int | None = None) 
     """Every track on the scene at one scan, ellipse opacity set by r. [B4, step 5]
 
     Generalises the hypotheses figure, whose one row per track does not scale to a mapped
-    field of about 70 plants: here each track is only its 2-sigma ellipse and mean, as
+    field of about 50 plants: here each track is only its 2-sigma ellipse and mean, as
     opaque as it is likely to exist. Reads only the run folder.
 
     Args:

@@ -39,21 +39,27 @@ filter:
     # clutter in this seed by inspecting labels.jsonl after simulating - the birth model
     # itself stays truth-blind, so this is the config author's job.
     #
-    # Seed 42, scan 24, detection 12 is a clutter return at (1.94, 4.82), 1.17 m from the
-    # nearest plant (chosen 2026-09-24). The first choice, scan 0 / detection 0, was
-    # clutter 0.71 m from a plant: its gate reached the plant, the collapse moved the
-    # track onto it, and r went to 1 - a captured phantom, not a decaying one.
+    # Seed 42, scan 24, detection 14 is a clutter return at (1.94, 1.82), 1.19 m from the
+    # nearest plant. It is the return chosen on 2026-09-24, then detection 12 at
+    # (1.94, 4.82): since the field moved 3 m ahead of the robot's start (D44) every y is
+    # 3 m lower, and the clutter stream does not depend on the plants, so the same scan
+    # holds the same return; only its index changed. The first choice, scan 0 /
+    # detection 0, was clutter 0.71 m from a plant: its gate reached the plant, the
+    # collapse moved the track onto it, and r went to 1 - a captured phantom, not a
+    # decaying one.
     #
-    # What this run shows, deliberately kept (2026-09-24): r decays from 0.08 to ~2e-4
-    # over scans 24-31, then the phantom is RECAPTURED - r passes 0.5 at k = 37 and goes
-    # to 1. Under collapse: best_branch the branch weights compare r(1 - p_D) with
+    # What this run shows, deliberately kept (2026-10-01): r decays from 0.08 to 4.4e-3
+    # over scans 24-26, then the phantom is RECAPTURED - r passes 0.5 at k = 30 and goes
+    # to 1. (In the field before D44: to ~2e-4 over scans 24-31, recaptured at k = 37.)
+    # Under collapse: best_branch the branch weights compare r(1 - p_D) with
     # r p_D N(z; z_hat, S) / (lambda_FA c(z)), so r cancels and the Gaussian jumps to any
     # detection within ~1 m however small r is; with no pruning the near-dead phantom
     # wanders onto a plant and is confirmed. (init_cov 0.06 keeps this seed's phantom
-    # dead; pruning below a threshold, A2 §5's deletion, would remove it.)
+    # dead, r about 1e-5; pruning at the bank's r_min = 1e-3 would not remove it here,
+    # since r never falls below 4.4e-3.)
     kind: single_from_measurement
     at_scan: 24
-    detection_index: 12
+    detection_index: 14
     # PHASE-1 STAND-IN: a configured constant in place of the measurement-driven
     # r_b = e / (e + lambda_FA c(z)), e = integral lambda_u(x) p_D(x) g(z|x) dx  [A2 §4].
     r_b: 0.08

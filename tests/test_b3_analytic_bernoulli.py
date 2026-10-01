@@ -297,7 +297,7 @@ def test_every_bank_track_matches_the_analytic_recursion(bank_run: RunDir) -> No
 
     check = json.loads(bank_run.metrics.read_text(encoding="utf-8"))["b3_cross_check"]
     assert check["estimates_log"] == "estimates_bernoulli_bank_unpruned.jsonl"
-    assert len(check["tracks"]) == 5
+    assert len(check["tracks"]) == 8
     for track in check["tracks"]:
         assert track["max_abs_error"] <= R_TOLERANCE, track
         assert (bank_run.plots / f"r_vs_analytic_track{track['track_id']}.png").is_file()

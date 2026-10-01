@@ -130,7 +130,7 @@ def test_shipped_bank_config_loads() -> None:
     cfg = load_run_config(BANK_CONFIG)
     birth: BirthConfig = cfg.filter_cfg.birth
     assert birth.kind == "from_measurements"
-    assert birth.seeds[1] == (24, 12)  # D8's phantom
+    assert birth.seeds[1] == (24, 14)  # D8's phantom
     assert (birth.at_scan, birth.detection_index) == birth.seeds[0]
     assert cfg.filter_cfg.prune.r_min == 1e-3
 
@@ -140,7 +140,7 @@ def test_bank_run_writes_the_unpruned_companion(bank_run: RunDir) -> None:
     pruned = read_estimates(bank_run.estimates("bernoulli_bank"))
     unpruned = read_estimates(bank_run.estimates(unpruned_log_name("bernoulli_bank")))
     lifetimes = track_lifetimes(pruned)
-    assert sorted(lifetimes) == list(range(5))
+    assert sorted(lifetimes) == list(range(8))
     assert any(life.deleted for life in lifetimes.values())
     assert not any(life.deleted for life in track_lifetimes(unpruned).values())
 

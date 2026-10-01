@@ -208,8 +208,8 @@ Back-of-envelope figures from 2026-09-30, for the `b1_two_rows*` scenarios.
     and raise its r by about 1.3 per scan. The bank therefore cannot find missing plants at
     0.35 m spacing. JIPDA (step 12 with existence) should, because it lets each neighbour's
     detection be explained by the neighbour. This is the key comparison of step 8c.
-- **Track count.** About 70 plants in the 12 m two-row field, so figures must handle tens
-  of tracks, not five.
+- **Track count.** 50 plants in the 8.4 m two-row field (70 in 12 m before D44), so
+  figures must handle tens of tracks, not five.
 - **Heatmap lesson** (for step 14). Two ways to build a heatmap, each with a flaw:
   - An *occupancy grid* makes each cell its own Bernoulli. It handles misses well, but one
     detection raises every cell in its gate.
@@ -443,7 +443,7 @@ truncation.
 
 **Step 5. Figures that work for any filter.** Each figure reads only `(run, filter_name)`:
 - **Tracks on the scene**, with ellipse opacity set by r. This generalises the hypotheses
-  figure, whose one-row-per-track layout does not scale to about 70 tracks.
+  figure, whose one-row-per-track layout does not scale to about 50 tracks.
 - **Existence map**: D(x) = Σ r_i N(x; m_i, P_i) on a grid. This is the PHD of any filter's
   output, so every method can be drawn as a heatmap. The PHD grid filter (step 14) draws
   its own grid in the same figure.

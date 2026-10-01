@@ -1,7 +1,8 @@
 # B3 / roadmap step 4a: the controlled phantom, repeated over seeds (decisions D17, D28).
 #
 # One hypothesis is placed at the same empty spot at the same scan in every seed - D8's
-# phantom position, about 1.17 m from the nearest plant - and only the random scene around
+# phantom position, about 1.19 m from the nearest plant (3 m lower since D44, as the
+# clutter return it copies) - and only the random scene around
 # it changes: plant jitter, clutter, misses and the weeds. What happens to it in each seed
 # (pruned, confirmed on a plant, confirmed on a weed, sustained by clutter, or still alive
 # and unconfirmed) is that seed's one outcome; `analyse --plots phantom_fates` reports the
@@ -30,7 +31,7 @@ filter:
     # An experiment setting, not a birth model: no detection is behind it (D28).
     kind: injected
     at_scan: 24
-    position: [1.94, 4.82]
+    position: [1.94, 1.82]
     r_b: 0.08
     init_cov: [[0.12, 0.0],
                [0.0, 0.12]]

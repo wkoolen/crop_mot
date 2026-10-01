@@ -157,6 +157,6 @@ def test_the_bank_does_not_find_the_empty_slots(tmp_path) -> None:
         os.chdir(cwd)
     result = missing_plants(run, "bernoulli_bank")
     empty_seen = result.empty & result.seen[-1]
-    assert empty_seen.sum() >= 3
+    assert empty_seen.sum() >= 2
     assert result.rates() == (0.0, 0.0)
     assert np.all(result.scores[-1, empty_seen] > 0.999)

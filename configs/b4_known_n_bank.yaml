@@ -31,8 +31,8 @@ filter:
   # The farmer's plan: the scenario's rows, nominal positions only (never truth.jsonl).
   plan:
     rows:
-      - {x: -0.75, y_start: 0.0, y_end: 12.0, spacing: 0.35}
-      - {x:  0.75, y_start: 0.0, y_end: 12.0, spacing: 0.35}
+      - {x: -0.75, y_start: 0.0, y_end: 8.4, spacing: 0.35}
+      - {x:  0.75, y_start: 0.0, y_end: 8.4, spacing: 0.35}
     prior_std: 0.036
   birth: null          # N known: no births
   survival: {p_S: 1.0}
