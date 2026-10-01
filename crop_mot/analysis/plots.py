@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 import yaml
 from matplotlib.animation import PillowWriter
-from matplotlib.colors import LinearSegmentedColormap, PowerNorm, to_rgba
+from matplotlib.colors import LinearSegmentedColormap, LogNorm, to_rgba
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from matplotlib.patches import Ellipse, Patch, Wedge
@@ -823,6 +823,28 @@ EXISTENCE_CMAP = LinearSegmentedColormap.from_list(
     "existence", [SURFACE, "#cde2fb", "#86b6ef", "#3987e5", "#1c5cab", "#0d366b"])
 # Grid spacing of the existence map, metres.
 EXISTENCE_GRID_STEP = 0.05
+# Decades the existence map's log colour scale spans below its top. A slot on a 0.25 m
+# prior peaks at 1 / (2 pi 0.25^2) = 2.5 per m^2 and a converged track near 100, so with
+# 3 decades the prior sits mid-scale, coloured out to about 2.5 sigma, and each update
+# visibly darkens and shrinks it.
+EXISTENCE_DECADES = 3
+
+
+def _existence_norm(vmax: float) -> LogNorm:
+    """The existence map's colour scale: logarithmic, EXISTENCE_DECADES decades below vmax.
+
+    Clipped, so a density below the bottom, zero included, takes the ramp's first colour,
+    the surface.
+    """
+    vmax = vmax if vmax > 0.0 else 1.0
+    return LogNorm(vmin=vmax * 10.0**-EXISTENCE_DECADES, vmax=vmax, clip=True)
+
+
+def _existence_colorbar(colorbar) -> None:
+    colorbar.set_label("D(x) [objects per m²], log scale", color=INK_SECONDARY)
+    # Through the colorbar, not its axis: a redraw (the GIF's update_normal) keeps it.
+    colorbar.formatter = FuncFormatter(lambda v, _: f"{v:g}")
+    colorbar.ax.tick_params(colors=INK_SECONDARY, labelsize=8)
 
 
 def _map_limits(truth, tracks, extra: np.ndarray | None = None,
@@ -929,14 +951,13 @@ def plot_existence_map(run: RunDir, filter_name: str, out: Path, k: int | None =
     ax = fig.subplots()
     _style_axes(ax)
     ax.grid(False)
-    # Square-root colour scale: a converged track peaks near 100 per m^2, and on a linear
-    # scale everything with less mass would vanish. The colorbar carries the true values.
+    # Log colour scale: a converged track peaks near 100 per m^2 and a slot on a wide prior
+    # near 2.5, and on a linear scale the prior would vanish. The colorbar carries the
+    # true values.
     image = ax.imshow(density, origin="lower", extent=(xs[0], xs[-1], ys[0], ys[-1]),
-                      cmap=EXISTENCE_CMAP, norm=PowerNorm(gamma=0.5, vmin=0.0),
+                      cmap=EXISTENCE_CMAP, norm=_existence_norm(density.max()),
                       interpolation="nearest")
-    colorbar = fig.colorbar(image, ax=ax, shrink=0.8)
-    colorbar.set_label("D(x) [objects per m²], square-root scale", color=INK_SECONDARY)
-    colorbar.ax.tick_params(colors=INK_SECONDARY, labelsize=9)
+    _existence_colorbar(fig.colorbar(image, ax=ax, shrink=0.8))
     _draw_field(ax, truth)
 
     ax.set_xlim(x0, x1)
@@ -1378,7 +1399,7 @@ class _ExistenceMovie:
     fov: object
     xs: np.ndarray
     ys: np.ndarray
-    vmax: float                  # the colour scale's top, fixed over frames
+    norm: LogNorm                # the colour scale, fixed over frames
     drops_weed_labels: bool      # the filter ignores weed-labelled detections (D22)
     by_origin: dict              # per origin kind, detections per scan, shape (K,)
     gates: object                # evaluation.GateContents
@@ -1426,7 +1447,7 @@ def _load_existence_movie(run: RunDir, filter_name: str) -> _ExistenceMovie:
         fov=cfg.scenario.sensor.fov,
         xs=np.arange(x0, x1 + MOVIE_GRID_STEP, MOVIE_GRID_STEP),
         ys=np.arange(y0, y1 + MOVIE_GRID_STEP, MOVIE_GRID_STEP),
-        vmax=max(peaks) if peaks else 1.0,
+        norm=_existence_norm(max(peaks) if peaks else 1.0),
         drops_weed_labels=cfg.filter_cfg.assumed_classifier is not None,
         by_origin={kind: np.array([ks.count(kind) for ks in kinds])
                    for kind in ("plant", "clutter", "weed")},
@@ -1457,7 +1478,7 @@ def _draw_existence_frame(movie: _ExistenceMovie, scene, series, k: int, colorba
     ys = movie.ys[(movie.ys >= pose.y - behind) & (movie.ys <= pose.y + ahead)]
     density = existence_density(tracks, movie.xs, ys)
     image = scene.imshow(density, origin="lower", cmap=EXISTENCE_CMAP,
-                         norm=PowerNorm(gamma=0.5, vmin=0.0, vmax=movie.vmax),
+                         norm=movie.norm,
                          extent=(movie.xs[0], movie.xs[-1], ys[0], ys[-1]),
                          interpolation="nearest")
     if colorbar is not None:
@@ -1608,8 +1629,7 @@ def animate_existence_map(run: RunDir, filter_name: str, out: Path,
     fig, scene, series = _existence_movie_figure()
     _draw_existence_frame(movie, scene, series, 0, colorbar=None)
     colorbar = fig.colorbar(scene.images[0], ax=scene, shrink=0.6, pad=0.02)
-    colorbar.set_label("D(x) [objects per m²], square-root scale", color=INK_SECONDARY)
-    colorbar.ax.tick_params(colors=INK_SECONDARY, labelsize=8)
+    _existence_colorbar(colorbar)
     out.parent.mkdir(parents=True, exist_ok=True)
     writer = PillowWriter(fps=fps)
     with writer.saving(fig, out, dpi=100):

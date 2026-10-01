@@ -1,0 +1,45 @@
+# b4_known_n_bank_weeds.yaml with a wide map prior: std 0.25 m per axis (2 sigma = 0.5 m)
+# instead of 0.036 m (decision D43). Everything else is that file's; see its comments.
+#
+# Asked for by the author to make the existence map show certainty being gained: on the
+# 3.6 cm prior a slot starts almost converged (std 3.6 -> 2.9 cm), so the map hardly
+# changes. Here a slot starts as a 0.5 m blur and each detection (sigma 0.2 m) shrinks it:
+# std 0.25 -> 0.16 m after one, 0.09 after four, 0.06 after ten.
+#
+# This is not the RTK-and-planting prior of D39: the world still jitters plants by 3 cm, so
+# the filter's prior is far wider than the truth. And it is wider than the 0.35 m plant
+# spacing, so the slots' priors overlap and each gate (radius about 1 m) holds several
+# neighbours. The bank's components do not compete for detections (D12), so slots drift
+# onto their neighbours' plants and several end on one plant: the map shows that too.
+
+name: b4_known_n_bank_weeds_wide_prior
+seed: 42
+
+scenario: configs/b1_two_rows_weeds.yaml
+
+filter:
+  kind: bernoulli_bank
+  motion: {kind: static, q: 0.0}
+  measurement:
+    kind: linear_xy
+    R: [[0.04, 0.0],
+        [0.0, 0.04]]
+  assumed_sensor:
+    fov: {min_range: 0.3, max_range: 4.0, half_angle: 0.6}
+    detection: {kind: constant, p_D: 0.85}
+    lambda_FA: 2.0
+  # The farmer's plan: the scenario's rows, nominal positions only (never truth.jsonl).
+  plan:
+    rows:
+      - {x: -0.75, y_start: 0.0, y_end: 12.0, spacing: 0.35}
+      - {x:  0.75, y_start: 0.0, y_end: 12.0, spacing: 0.35}
+    prior_std: 0.25
+  birth: null          # N known: no births
+  survival: {p_S: 1.0}
+  gate: {chi2_prob: 0.99}
+  collapse: best_branch
+
+analysis:
+  b3_reference: null   # every slot has r = 1 throughout; the A2 check is for births
+  monte_carlo: null
+  plots: [scene, tracks, existence_map, cardinality, gospa, nees, gate_contents]

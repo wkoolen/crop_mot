@@ -68,6 +68,7 @@ python3 -m crop_mot track    --config configs/b4_known_n_bank_labels.yaml  # N k
 python3 -m crop_mot track    --config configs/b4_bounded_n_bank.yaml   # N bounded, missing plants: the bank's failure
 python3 -m crop_mot yaw      --config configs/b4_yaw_sensitivity.yaml # NEES and GOSPA against a heading error (~40 s)
 python3 -m crop_mot analyse  --run runs/<stamp>_b4_known_n_bank_weeds_seed42 --plots existence_anim  # existence map over time, GIF (~1.5 min)
+python3 -m crop_mot track    --config configs/b4_known_n_bank_weeds_wide_prior.yaml  # N known on a 0.25 m prior: the map visibly sharpens (D43)
 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 python3 -m crop_mot scaling --config configs/b2_bernoulli_bank_weeds.yaml --sweep lambda_FA --values 1 2 4 8 16 --seeds 3
 python3 -m pytest tests -q
 ```
